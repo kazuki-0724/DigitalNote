@@ -11,6 +11,8 @@ import com.waju.factory.digitalnote.ui.canvas.CanvasSettings
 import com.waju.factory.digitalnote.ui.canvas.CanvasUiState
 import com.waju.factory.digitalnote.ui.canvas.DrawStroke
 import com.waju.factory.digitalnote.ui.canvas.DrawingTool
+import com.waju.factory.digitalnote.ui.canvas.LaserTrail
+import com.waju.factory.digitalnote.ui.canvas.StickyNote
 import com.waju.factory.digitalnote.ui.canvas.StrokePoint
 import com.waju.factory.digitalnote.ui.canvas.WHITEBOARD_PAGE_INDEX
 import com.waju.factory.digitalnote.ui.canvas.applyPressureCurve
@@ -31,6 +33,15 @@ class CanvasViewModel(
         private const val MIN_SCALE = 0.2f
         private const val MAX_SCALE = 3.0f
         private const val TRANSFORM_SAVE_DEBOUNCE_MS = 200L
+        private const val LASER_TRAIL_KEEP_MS = 2_000L
+        private const val LASER_TRAIL_CLEANUP_INTERVAL_MS = 80L
+        private const val DEFAULT_STICKY_NOTE_WIDTH = 480f
+        private const val DEFAULT_STICKY_NOTE_HEIGHT = 420f
+        private const val DEFAULT_STICKY_NOTE_FONT_SIZE = 16f
+        private const val MIN_STICKY_NOTE_WIDTH = 180f
+        private const val MIN_STICKY_NOTE_HEIGHT = 140f
+        private const val MAX_STICKY_NOTE_WIDTH = 1200f
+        private const val MAX_STICKY_NOTE_HEIGHT = 1050f
     }
 
     private val _uiState = MutableStateFlow(CanvasUiState())
@@ -41,11 +52,16 @@ class CanvasViewModel(
     private var isPersisting = false
     private var pendingCanvasSettings: CanvasSettings? = null
     private var isPersistingCanvasSettings = false
+    private var pendingPersistStickyNotes: List<StickyNote>? = null
+    private var isPersistingStickyNotes = false
     private var transformPersistJob: Job? = null
+    private var laserCleanupJob: Job? = null
+    private var nextStickyNoteId = 1L
 
     init {
         loadCanvasSettings()
         loadInitialStrokes()
+        loadStickyNotes()
     }
 
     private fun loadCanvasSettings() {
@@ -92,8 +108,104 @@ class CanvasViewModel(
         }
     }
 
+    private fun loadStickyNotes() {
+        viewModelScope.launch {
+            val loaded = repository.getStickyNotes(noteId)
+            val maxId = loaded.maxOfOrNull { it.id } ?: 0L
+            nextStickyNoteId = maxId + 1
+            _uiState.update { it.copy(stickyNotes = loaded) }
+        }
+    }
+
     fun onToolChanged(tool: DrawingTool) {
-        _uiState.update { it.copy(tool = tool) }
+        _uiState.update { it.copy(tool = tool, activePoints = emptyList()) }
+    }
+
+    fun addStickyNote(x: Float, y: Float): Long {
+        val createdId = nextStickyNoteId++
+        _uiState.update { state ->
+            val targetPage = currentContextPage(state)
+            val color = state.palette.getOrElse(state.selectedColorIndex) { Color.Black }
+            state.copy(
+                stickyNotes = state.stickyNotes + StickyNote(
+                    id = createdId,
+                    pageIndex = targetPage,
+                    x = x,
+                    y = y,
+                    width = DEFAULT_STICKY_NOTE_WIDTH,
+                    height = DEFAULT_STICKY_NOTE_HEIGHT,
+                    text = "",
+                    color = color,
+                    fontSize = DEFAULT_STICKY_NOTE_FONT_SIZE
+                )
+            )
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
+        return createdId
+    }
+
+    fun updateStickyNoteText(id: Long, text: String) {
+        _uiState.update { state ->
+            state.copy(stickyNotes = state.stickyNotes.map { note ->
+                if (note.id == id) note.copy(text = text) else note
+            })
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
+    }
+
+    fun updateStickyNoteStyle(id: Long, color: Color, fontSize: Float) {
+        _uiState.update { state ->
+            state.copy(stickyNotes = state.stickyNotes.map { note ->
+                if (note.id == id) {
+                    note.copy(
+                        color = color,
+                        fontSize = fontSize.coerceIn(10f, 40f)
+                    )
+                } else {
+                    note
+                }
+            })
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
+    }
+
+    fun toggleReadOnly() {
+        _uiState.update {
+            val newTool = if (it.tool == DrawingTool.READONLY) DrawingTool.PEN else DrawingTool.READONLY
+            it.copy(tool = newTool, activePoints = emptyList())
+        }
+    }
+
+    fun deleteStickyNote(id: Long) {
+        _uiState.update { state ->
+            state.copy(stickyNotes = state.stickyNotes.filterNot { it.id == id })
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
+    }
+
+    fun moveStickyNote(id: Long, newX: Float, newY: Float) {
+        _uiState.update { state ->
+            state.copy(stickyNotes = state.stickyNotes.map { note ->
+                if (note.id == id) note.copy(x = newX, y = newY) else note
+            })
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
+    }
+
+    fun resizeStickyNote(id: Long, newWidth: Float, newHeight: Float) {
+        _uiState.update { state ->
+            state.copy(stickyNotes = state.stickyNotes.map { note ->
+                if (note.id == id) {
+                    note.copy(
+                        width = newWidth.coerceIn(MIN_STICKY_NOTE_WIDTH, MAX_STICKY_NOTE_WIDTH),
+                        height = newHeight.coerceIn(MIN_STICKY_NOTE_HEIGHT, MAX_STICKY_NOTE_HEIGHT)
+                    )
+                } else {
+                    note
+                }
+            })
+        }
+        persistStickyNotes(_uiState.value.stickyNotes)
     }
 
     fun onModeChanged(mode: CanvasMode) {
@@ -215,6 +327,8 @@ class CanvasViewModel(
     }
 
     fun startStroke(x: Float, y: Float, pressure: Float, timestamp: Long) {
+        if (_uiState.value.tool == DrawingTool.TEXT) return
+        if (_uiState.value.tool == DrawingTool.READONLY) return
         if (_uiState.value.tool != DrawingTool.LASER_POINTER) {
             redoStack.clear()
         }
@@ -223,6 +337,8 @@ class CanvasViewModel(
     }
 
     fun extendStroke(x: Float, y: Float, pressure: Float, timestamp: Long) {
+        if (_uiState.value.tool == DrawingTool.TEXT) return
+        if (_uiState.value.tool == DrawingTool.READONLY) return
         val point = StrokePoint(x = x, y = y, pressure = pressure, timestamp = timestamp)
         _uiState.update { it.copy(activePoints = it.activePoints + point) }
     }
@@ -231,8 +347,28 @@ class CanvasViewModel(
         val state = _uiState.value
         if (state.activePoints.isEmpty()) return
 
-        if (state.tool == DrawingTool.LASER_POINTER) {
+        if (state.tool == DrawingTool.TEXT) {
             _uiState.update { it.copy(activePoints = emptyList()) }
+            return
+        }
+
+        if (state.tool == DrawingTool.READONLY) {
+            _uiState.update { it.copy(activePoints = emptyList()) }
+            return
+        }
+
+        if (state.tool == DrawingTool.LASER_POINTER) {
+            val now = System.currentTimeMillis()
+            _uiState.update {
+                it.copy(
+                    laserTrails = it.laserTrails + LaserTrail(
+                        points = state.activePoints,
+                        createdAtMillis = now
+                    ),
+                    activePoints = emptyList()
+                )
+            }
+            ensureLaserCleanup()
             return
         }
 
@@ -295,12 +431,20 @@ class CanvasViewModel(
         val state = _uiState.value
         val contextPage = currentContextPage(state)
         val removed = state.strokes.filter { it.pageIndex == contextPage }
-        if (removed.isEmpty()) return
+        val removedStickyNotes = state.stickyNotes.filter { it.pageIndex == contextPage }
+        if (removed.isEmpty() && removedStickyNotes.isEmpty()) return
 
         redoStack.addAll(removed)
         val updated = state.strokes.filterNot { it.pageIndex == contextPage }
-        _uiState.update { it.copy(strokes = updated, activePoints = emptyList()) }
+        _uiState.update {
+            it.copy(
+                strokes = updated,
+                stickyNotes = it.stickyNotes.filterNot { note -> note.pageIndex == contextPage },
+                activePoints = emptyList()
+            )
+        }
         persist(updated)
+        persistStickyNotes(_uiState.value.stickyNotes)
     }
 
     private fun currentContextPage(state: CanvasUiState): Int {
@@ -346,7 +490,25 @@ class CanvasViewModel(
 
     override fun onCleared() {
         transformPersistJob?.cancel()
+        laserCleanupJob?.cancel()
         super.onCleared()
+    }
+
+    private fun ensureLaserCleanup() {
+        if (laserCleanupJob?.isActive == true) return
+        laserCleanupJob = viewModelScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                var shouldContinue = false
+                _uiState.update { state ->
+                    val activeTrails = state.laserTrails.filter { now - it.createdAtMillis < LASER_TRAIL_KEEP_MS }
+                    shouldContinue = state.activePoints.isNotEmpty() || activeTrails.isNotEmpty()
+                    state.copy(laserTrails = activeTrails)
+                }
+                if (!shouldContinue) break
+                delay(LASER_TRAIL_CLEANUP_INTERVAL_MS)
+            }
+        }
     }
 
     private fun persist(strokes: List<DrawStroke>) {
@@ -361,6 +523,21 @@ class CanvasViewModel(
                 repository.replaceStrokes(noteId = noteId, strokes = next)
             }
             isPersisting = false
+        }
+    }
+
+    private fun persistStickyNotes(stickyNotes: List<StickyNote>) {
+        pendingPersistStickyNotes = stickyNotes
+        if (isPersistingStickyNotes) return
+
+        viewModelScope.launch {
+            isPersistingStickyNotes = true
+            while (isActive) {
+                val next = pendingPersistStickyNotes ?: break
+                pendingPersistStickyNotes = null
+                repository.saveStickyNotes(noteId = noteId, stickyNotes = next)
+            }
+            isPersistingStickyNotes = false
         }
     }
 }

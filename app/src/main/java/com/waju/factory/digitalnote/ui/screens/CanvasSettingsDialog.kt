@@ -64,14 +64,14 @@ internal fun CanvasSettingsDialog(
                 Text("背景", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = uiState.backgroundStyle == CanvasBackgroundStyle.GRID,
-                        onClick = { onBackgroundStyleChanged(CanvasBackgroundStyle.GRID) },
-                        label = { Text("マス目") }
-                    )
-                    FilterChip(
                         selected = uiState.backgroundStyle == CanvasBackgroundStyle.RULED,
                         onClick = { onBackgroundStyleChanged(CanvasBackgroundStyle.RULED) },
                         label = { Text("罫線") }
+                    )
+                    FilterChip(
+                        selected = uiState.backgroundStyle == CanvasBackgroundStyle.GRID,
+                        onClick = { onBackgroundStyleChanged(CanvasBackgroundStyle.GRID) },
+                        label = { Text("マス目") }
                     )
                 }
 
@@ -82,13 +82,13 @@ internal fun CanvasSettingsDialog(
                     FilterChip(
                         selected = uiState.inputMode == CanvasInputMode.PEN_ONLY,
                         onClick = { onInputModeChanged(CanvasInputMode.PEN_ONLY) },
-                        label = { Text("ペン入力") },
+                        label = { Text("ペン") },
                         leadingIcon = { Icon(Icons.Outlined.Draw, contentDescription = null) }
                     )
                     FilterChip(
                         selected = uiState.inputMode == CanvasInputMode.FINGER_ONLY,
                         onClick = { onInputModeChanged(CanvasInputMode.FINGER_ONLY) },
-                        label = { Text("指書き") },
+                        label = { Text("指") },
                         leadingIcon = { Icon(Icons.Outlined.TouchApp, contentDescription = null) }
                     )
                 }

@@ -2,8 +2,10 @@ package com.waju.factory.digitalnote.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.graphics.Color
 import com.waju.factory.digitalnote.data.repository.NoteRepository
 import com.waju.factory.digitalnote.model.NoteItem
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -18,8 +20,20 @@ class NotesViewModel(
     )
 
 
-    suspend fun createNote(): Int {
-        return repository.createNote()
+    suspend fun createNote(title: String, coverColor: Color): Int {
+        return repository.createNote(title, coverColor)
+    }
+
+    fun updateNoteAppearance(noteId: Int, title: String, coverColor: Color) {
+        viewModelScope.launch {
+            repository.updateNoteAppearance(noteId = noteId, title = title, coverColor = coverColor)
+        }
+    }
+
+    fun deleteNote(noteId: Int) {
+        viewModelScope.launch {
+            repository.deleteNote(noteId)
+        }
     }
 }
 

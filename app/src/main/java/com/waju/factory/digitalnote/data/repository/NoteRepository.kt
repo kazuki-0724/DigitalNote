@@ -1,8 +1,10 @@
 package com.waju.factory.digitalnote.data.repository
 
 import androidx.compose.ui.graphics.Color
+import com.waju.factory.digitalnote.data.local.dao.CanvasTextBoxDao
 import com.waju.factory.digitalnote.data.local.dao.NoteDao
 import com.waju.factory.digitalnote.data.local.dao.StrokeDao
+import com.waju.factory.digitalnote.data.local.entity.CanvasTextBoxEntity
 import com.waju.factory.digitalnote.data.local.entity.NoteEntity
 import com.waju.factory.digitalnote.data.local.entity.StrokeEntity
 import com.waju.factory.digitalnote.model.NoteItem
@@ -13,25 +15,30 @@ import com.waju.factory.digitalnote.ui.canvas.CanvasSettings
 import com.waju.factory.digitalnote.ui.canvas.DefaultCanvasPalette
 import com.waju.factory.digitalnote.ui.canvas.DrawStroke
 import com.waju.factory.digitalnote.ui.canvas.DrawingTool
+import com.waju.factory.digitalnote.ui.canvas.StickyNote
 import com.waju.factory.digitalnote.ui.canvas.StrokePoint
+import com.waju.factory.digitalnote.ui.theme.NoteCoverColors
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
 class NoteRepository(
     private val noteDao: NoteDao,
-    private val strokeDao: StrokeDao
+    private val strokeDao: StrokeDao,
+    private val textBoxDao: CanvasTextBoxDao
 ) {
-    suspend fun createNote(): Int {
+    suspend fun createNote(title: String, coverColor: Color = NoteCoverColors.first()): Int {
         val newId = (noteDao.maxId() ?: 0) + 1
         val defaultSettings = CanvasSettings()
         val note = NoteEntity(
             id = newId,
-            title = "新しいノート",
+            title = title,
             excerpt = "ここにアイデアを書き始めましょう。",
             content = "",
             updatedLabel = "今",
             tagsCsv = "NEW",
             tonesCsv = deriveTones(defaultSettings.palette).joinToString(",") { it.value.toLong().toString() },
+            coverColorArgb = coverColor.value.toLong(),
             handwritten = true,
             starred = false,
             hasAttachment = false,
@@ -52,8 +59,16 @@ class NoteRepository(
         return newId
     }
 
-    fun observeNotes(): Flow<List<NoteItem>> = noteDao.observeAll().map { entities ->
-        entities.map { it.toModel() }
+    fun observeNotes(): Flow<List<NoteItem>> = combine(
+        noteDao.observeAll(),
+        textBoxDao.observeSearchableText()
+    ) { entities, searchableRows ->
+        val searchableTextByNoteId = searchableRows.associate { row ->
+            row.noteId to (row.searchableText.orEmpty())
+        }
+        entities.map { entity ->
+            entity.toModel(searchableText = searchableTextByNoteId[entity.id].orEmpty())
+        }
     }
 
     fun observeNote(noteId: Int): Flow<NoteItem?> = noteDao.observeById(noteId).map { it?.toModel() }
@@ -81,6 +96,20 @@ class NoteRepository(
             content = content
         )
         noteDao.update(updated)
+    }
+
+    suspend fun updateNoteAppearance(noteId: Int, title: String, coverColor: Color) {
+        val existing = noteDao.getById(noteId) ?: return
+        noteDao.update(
+            existing.copy(
+                title = title,
+                coverColorArgb = coverColor.value.toLong()
+            )
+        )
+    }
+
+    suspend fun deleteNote(noteId: Int) {
+        noteDao.deleteById(noteId)
     }
 
     suspend fun saveCanvasSettings(noteId: Int, settings: CanvasSettings) {
@@ -123,6 +152,17 @@ class NoteRepository(
         strokeDao.replaceByNoteId(noteId, entities)
     }
 
+    suspend fun getStickyNotes(noteId: Int): List<StickyNote> {
+        return textBoxDao.getByNoteId(noteId).map { it.toModel() }
+    }
+
+    suspend fun saveStickyNotes(noteId: Int, stickyNotes: List<StickyNote>) {
+        val noteExists = noteDao.getById(noteId) != null
+        if (!noteExists) return
+        val entities = stickyNotes.map { it.toEntity(noteId) }
+        textBoxDao.replaceByNoteId(noteId, entities)
+    }
+
 }
 
 private fun encodeColors(colors: List<Color>): String {
@@ -162,7 +202,7 @@ private fun decodePoints(encoded: String): List<StrokePoint> {
     }
 }
 
-private fun NoteEntity.toModel(): NoteItem {
+private fun NoteEntity.toModel(searchableText: String = ""): NoteItem {
     val palette = decodeColors(paletteCsv, DefaultCanvasPalette)
     val tones = decodeColors(tonesCsv, deriveTones(palette))
 
@@ -174,6 +214,8 @@ private fun NoteEntity.toModel(): NoteItem {
         updatedLabel = updatedLabel,
         tags = tagsCsv.split(',').filter { it.isNotBlank() },
         tones = tones,
+        coverColor = Color(coverColorArgb.toULong()),
+        searchableText = searchableText,
         handwritten = handwritten,
         starred = starred,
         hasAttachment = hasAttachment
@@ -211,6 +253,7 @@ private fun NoteItem.toEntity(): NoteEntity {
         updatedLabel = updatedLabel,
         tagsCsv = tags.joinToString(separator = ","),
         tonesCsv = tones.joinToString(separator = ",") { it.value.toLong().toString() },
+        coverColorArgb = coverColor.value.toLong(),
         handwritten = handwritten,
         starred = starred,
         hasAttachment = hasAttachment,
@@ -237,6 +280,35 @@ private fun StrokeEntity.toModel(): DrawStroke {
         color = Color(colorArgb.toULong()),
         width = width,
         points = decodePoints(pointsEncoded)
+    )
+}
+
+private fun CanvasTextBoxEntity.toModel(): StickyNote {
+    return StickyNote(
+        id = id,
+        pageIndex = pageIndex,
+        x = x,
+        y = y,
+        width = width,
+        height = height,
+        text = text,
+        color = Color(colorArgb.toULong()),
+        fontSize = fontSize
+    )
+}
+
+private fun StickyNote.toEntity(noteId: Int): CanvasTextBoxEntity {
+    return CanvasTextBoxEntity(
+        id = id,
+        noteId = noteId,
+        pageIndex = pageIndex,
+        x = x,
+        y = y,
+        width = width,
+        height = height,
+        text = text,
+        colorArgb = color.value.toLong(),
+        fontSize = fontSize
     )
 }
 

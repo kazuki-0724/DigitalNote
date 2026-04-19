@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,7 +62,10 @@ fun HomeTopBar() {
 }
 
 @Composable
-fun SectionTopBar(title: String) {
+fun SectionTopBar(
+    title: String,
+    onBackToTop: (() -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -68,8 +73,14 @@ fun SectionTopBar(title: String) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = { }) {
-            Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "メニュー")
+        if (onBackToTop != null) {
+            IconButton(onClick = onBackToTop) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "トップへ戻る")
+            }
+        } else {
+            IconButton(onClick = { }) {
+                Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "メニュー")
+            }
         }
         Text(
             text = title,
@@ -77,12 +88,18 @@ fun SectionTopBar(title: String) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
-            Text(
-                text = "👤",
-                modifier = Modifier.padding(10.dp),
-                fontSize = 18.sp
-            )
+        if (onBackToTop != null) {
+            TextButton(onClick = onBackToTop) {
+                Text("トップ")
+            }
+        } else {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
+                Text(
+                    text = "👤",
+                    modifier = Modifier.padding(10.dp),
+                    fontSize = 18.sp
+                )
+            }
         }
     }
 }

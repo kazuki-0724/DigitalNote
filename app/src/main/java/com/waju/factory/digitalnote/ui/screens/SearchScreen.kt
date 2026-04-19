@@ -60,7 +60,8 @@ fun SearchScreen(
         item {
             OutlinedTextField(
                 value = query,
-                onValueChange = { query = it },
+                onValueChange = { query = it.replace("\n", " ").replace("\r", "") },
+                singleLine = true,
                 placeholder = { Text("ノート、タグ、内容を検索...") },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 modifier = Modifier

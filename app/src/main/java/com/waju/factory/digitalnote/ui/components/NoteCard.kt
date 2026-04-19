@@ -1,7 +1,8 @@
 package com.waju.factory.digitalnote.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,49 +27,72 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.waju.factory.digitalnote.model.NoteItem
 import com.waju.factory.digitalnote.ui.theme.TextSecondary
+import com.waju.factory.digitalnote.ui.theme.contentColorForCover
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun NoteCard(note: NoteItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun NoteCard(
+    note: NoteItem,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
+) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
+        Column {
+            val coverTextColor = contentColorForCover(note.coverColor)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(note.coverColor)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = note.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = coverTextColor
+                    )
+                    Text(
+                        text = note.updatedLabel,
+                        color = coverTextColor.copy(alpha = 0.82f),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.padding(14.dp)) {
+                if (note.hasAttachment) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(170.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Brush.linearGradient(note.tones))
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
                 Text(
-                    text = note.title,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
+                    text = note.excerpt,
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium
                 )
-                Text(note.updatedLabel, color = TextSecondary, fontSize = 12.sp)
-            }
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-            if (note.hasAttachment) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(170.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Brush.linearGradient(note.tones))
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = note.excerpt,
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                note.tags.take(3).forEach { tag ->
-                    AssistChip(onClick = { }, label = { Text(tag, fontSize = 11.sp) })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    note.tags.take(3).forEach { tag ->
+                        AssistChip(onClick = { }, label = { Text(tag, fontSize = 11.sp) })
+                    }
                 }
             }
         }

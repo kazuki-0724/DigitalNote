@@ -10,10 +10,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,6 +30,7 @@ import com.waju.factory.digitalnote.data.local.AppDatabase
 import com.waju.factory.digitalnote.data.repository.NoteRepository
 import com.waju.factory.digitalnote.navigation.AppRoute
 import com.waju.factory.digitalnote.ui.components.HomeTopBar
+import com.waju.factory.digitalnote.ui.components.NoteUpsertDialog
 import com.waju.factory.digitalnote.ui.components.SectionTopBar
 import com.waju.factory.digitalnote.ui.screens.CanvasScreen
 import com.waju.factory.digitalnote.ui.screens.EditorScreen
@@ -38,6 +41,7 @@ import com.waju.factory.digitalnote.ui.viewmodel.EditorViewModel
 import com.waju.factory.digitalnote.ui.viewmodel.EditorViewModelFactory
 import com.waju.factory.digitalnote.ui.viewmodel.NotesViewModel
 import com.waju.factory.digitalnote.ui.viewmodel.NotesViewModelFactory
+import com.waju.factory.digitalnote.ui.theme.NoteCoverColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -45,7 +49,7 @@ fun DigitalNoteApp() {
     val context = LocalContext.current
     val repository = remember {
         val database = AppDatabase.getInstance(context)
-        NoteRepository(database.noteDao(), database.strokeDao())
+        NoteRepository(database.noteDao(), database.strokeDao(), database.textBoxDao())
     }
 
     val notesViewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
@@ -57,6 +61,16 @@ fun DigitalNoteApp() {
     val currentRoute = backStackEntry?.destination?.route.orEmpty()
     val isCanvasRoute = currentRoute.startsWith("canvas")
     val isEditorRoute = currentRoute.startsWith("editor")
+    val currentCanvasNoteId = backStackEntry?.arguments?.getInt("noteId")
+    val currentCanvasNoteTitle = notes.firstOrNull { it.id == currentCanvasNoteId }?.title
+
+    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
+    var newNoteTitle by rememberSaveable { mutableStateOf("") }
+    var newNoteCoverColorIndex by rememberSaveable { mutableStateOf(0) }
+    var showEditDialog by rememberSaveable { mutableStateOf(false) }
+    var editingNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
+    var editingNoteTitle by rememberSaveable { mutableStateOf("") }
+    var editingNoteCoverColorIndex by rememberSaveable { mutableStateOf(0) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -64,17 +78,24 @@ fun DigitalNoteApp() {
         topBar = {
             when {
                 isEditorRoute -> Unit
-                isCanvasRoute -> SectionTopBar(title = "キャンバス")
+                isCanvasRoute -> SectionTopBar(
+                    title = currentCanvasNoteTitle?.ifBlank { "キャンバス" } ?: "キャンバス",
+                    onBackToTop = {
+                        navController.navigate(AppRoute.Notes.route) {
+                            popUpTo(AppRoute.Notes.route) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
+                )
                 else -> HomeTopBar()
             }
         },
         floatingActionButton = {
             if (currentRoute.startsWith(AppRoute.Notes.route)) {
                 FloatingActionButton(onClick = {
-                    scope.launch {
-                        val newId = notesViewModel.createNote()
-                        navController.navigate(AppRoute.Canvas.create(newId))
-                    }
+                    newNoteTitle = ""
+                    newNoteCoverColorIndex = 0
+                    showCreateDialog = true
                 }) {
                     Icon(Icons.Outlined.Add, contentDescription = "新規ノート")
                 }
@@ -94,6 +115,13 @@ fun DigitalNoteApp() {
                     modifier = Modifier.fillMaxSize(),
                     onOpenNote = { note ->
                         navController.navigate(AppRoute.Canvas.create(note.id))
+                    },
+                    onLongPressNote = { note ->
+                        editingNoteId = note.id
+                        editingNoteTitle = note.title
+                        editingNoteCoverColorIndex = NoteCoverColors.indexOfFirst { it.value == note.coverColor.value }
+                            .takeIf { it >= 0 } ?: 0
+                        showEditDialog = true
                     }
                 )
             }
@@ -133,6 +161,13 @@ fun DigitalNoteApp() {
                     onStrokeMove = canvasViewModel::extendStroke,
                     onStrokeEnd = canvasViewModel::finishStroke,
                     onStrokeCancel = canvasViewModel::cancelStroke,
+                    onAddStickyNote = canvasViewModel::addStickyNote,
+                    onUpdateStickyNoteText = canvasViewModel::updateStickyNoteText,
+                    onMoveStickyNote = canvasViewModel::moveStickyNote,
+                    onResizeStickyNote = canvasViewModel::resizeStickyNote,
+                    onUpdateStickyNoteStyle = canvasViewModel::updateStickyNoteStyle,
+                    onDeleteStickyNote = canvasViewModel::deleteStickyNote,
+                    onToggleReadOnly = canvasViewModel::toggleReadOnly,
                     onUndo = canvasViewModel::undo,
                     onRedo = canvasViewModel::redo,
                     onClear = canvasViewModel::clear
@@ -168,6 +203,65 @@ fun DigitalNoteApp() {
                     onClose = { navController.popBackStack() }
                 )
             }
+        }
+
+        if (showCreateDialog) {
+            NoteUpsertDialog(
+                title = "ノートを作成",
+                noteTitle = newNoteTitle,
+                selectedCoverColorIndex = newNoteCoverColorIndex,
+                onTitleChange = { newNoteTitle = it },
+                onCoverColorChange = { newNoteCoverColorIndex = it },
+                onDismiss = {
+                    showCreateDialog = false
+                    newNoteTitle = ""
+                    newNoteCoverColorIndex = 0
+                },
+                onConfirm = { title, coverColor ->
+                    val safeTitle = title.trim().ifBlank { "新しいノート" }
+                    scope.launch {
+                        val newId = notesViewModel.createNote(safeTitle, coverColor)
+                        showCreateDialog = false
+                        newNoteTitle = ""
+                        newNoteCoverColorIndex = 0
+                        navController.navigate(AppRoute.Canvas.create(newId))
+                    }
+                },
+                confirmText = "作成"
+            )
+        }
+
+        if (showEditDialog && editingNoteId != null) {
+            NoteUpsertDialog(
+                title = "ノートを編集",
+                noteTitle = editingNoteTitle,
+                selectedCoverColorIndex = editingNoteCoverColorIndex,
+                onTitleChange = { editingNoteTitle = it },
+                onCoverColorChange = { editingNoteCoverColorIndex = it },
+                onDismiss = {
+                    showEditDialog = false
+                    editingNoteId = null
+                    editingNoteTitle = ""
+                    editingNoteCoverColorIndex = 0
+                },
+                onConfirm = { title, coverColor ->
+                    val noteId = editingNoteId ?: return@NoteUpsertDialog
+                    notesViewModel.updateNoteAppearance(noteId, title.trim().ifBlank { "新しいノート" }, coverColor)
+                    showEditDialog = false
+                    editingNoteId = null
+                    editingNoteTitle = ""
+                    editingNoteCoverColorIndex = 0
+                },
+                onDelete = {
+                    val noteId = editingNoteId ?: return@NoteUpsertDialog
+                    notesViewModel.deleteNote(noteId)
+                    showEditDialog = false
+                    editingNoteId = null
+                    editingNoteTitle = ""
+                    editingNoteCoverColorIndex = 0
+                },
+                confirmText = "保存"
+            )
         }
     }
 }

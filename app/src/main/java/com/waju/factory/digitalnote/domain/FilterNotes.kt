@@ -13,7 +13,7 @@ fun filterNotes(
         val queryMatch = if (query.isBlank()) {
             true
         } else {
-            val source = "${note.title} ${note.excerpt} ${note.tags.joinToString(" ")}".lowercase()
+            val source = "${note.title} ${note.excerpt} ${note.tags.joinToString(" ")} ${note.searchableText}".lowercase()
             source.contains(query.lowercase())
         }
 

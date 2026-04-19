@@ -28,6 +28,9 @@ interface NoteDao {
     @Update
     suspend fun update(note: NoteEntity)
 
+    @Query("DELETE FROM notes WHERE id = :noteId")
+    suspend fun deleteById(noteId: Int)
+
     @Query("SELECT COUNT(*) FROM notes")
     suspend fun count(): Int
 

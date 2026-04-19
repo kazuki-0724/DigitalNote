@@ -10,6 +10,8 @@ data class NoteItem(
     val updatedLabel: String,
     val tags: List<String>,
     val tones: List<Color>,
+    val coverColor: Color = Color(0xFFFFFFFF),
+    val searchableText: String = "",
     val handwritten: Boolean = false,
     val starred: Boolean = false,
     val hasAttachment: Boolean = false

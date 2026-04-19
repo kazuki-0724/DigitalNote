@@ -12,6 +12,7 @@ data class NoteEntity(
     val updatedLabel: String,
     val tagsCsv: String,
     val tonesCsv: String,
+    val coverColorArgb: Long,
     val handwritten: Boolean,
     val starred: Boolean,
     val hasAttachment: Boolean,

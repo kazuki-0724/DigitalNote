@@ -202,6 +202,9 @@ private fun PageThumbnail(
                         DrawingTool.ERASER -> Color(0xFFF8FAFC)
                         DrawingTool.LASER_POINTER -> Color(0xFFFF3B30)
                         DrawingTool.PEN -> stroke.color
+                        DrawingTool.MARKER -> stroke.color.copy(alpha = 0.45f)
+                        DrawingTool.TEXT -> stroke.color
+                        DrawingTool.READONLY -> stroke.color
                     }
 
                     val path = Path()

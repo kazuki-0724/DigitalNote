@@ -19,11 +19,15 @@ import androidx.compose.material.icons.automirrored.outlined.MenuOpen
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.AutoFixHigh
+import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Draw
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.EditOff
 import androidx.compose.material.icons.outlined.FilterCenterFocus
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -51,7 +55,10 @@ internal fun CanvasTopBarSection(
     onColorChanged: (Int) -> Unit,
     onOpenPalette: () -> Unit,
     onOpenSettings: () -> Unit,
-    onToggleSidebar: () -> Unit
+    onToggleSidebar: () -> Unit,
+    onToggleReadOnly: () -> Unit = {},
+    onPrevPage: () -> Unit = {},
+    onNextPage: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -66,20 +73,37 @@ internal fun CanvasTopBarSection(
         ) {
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.PEN,
-                label = "ペン",
+//                label = "ペン",
                 icon = Icons.Outlined.Draw,
                 onClick = { onToolChanged(DrawingTool.PEN) }
             )
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.ERASER,
-                label = "消しゴム",
+//                label = "消しゴム",
                 icon = Icons.Outlined.AutoFixHigh,
                 onClick = { onToolChanged(DrawingTool.ERASER) }
+            )
+            ToolbarToggleButton(
+                selected = uiState.tool == DrawingTool.MARKER,
+//                label = "マーカー",
+                icon = Icons.Outlined.BorderColor,
+                onClick = { onToolChanged(DrawingTool.MARKER) }
+            )
+            ToolbarToggleButton(
+                selected = uiState.tool == DrawingTool.TEXT,
+//                label = "付箋",
+                icon = Icons.Outlined.TextFields,
+                onClick = { onToolChanged(DrawingTool.TEXT) }
+            )
+            ToolbarToggleButton(
+                selected = uiState.tool == DrawingTool.READONLY,
+                icon = Icons.Outlined.EditOff,
+                onClick = { onToolChanged(DrawingTool.READONLY) }
             )
             FilterChip(
                 selected = uiState.tool == DrawingTool.LASER_POINTER,
                 onClick = { onToolChanged(DrawingTool.LASER_POINTER) },
-                label = { Text("レーザー") },
+                label = {},
                 leadingIcon = { Icon(Icons.Outlined.FilterCenterFocus, contentDescription = null) }
             )
 
@@ -109,6 +133,26 @@ internal fun CanvasTopBarSection(
 
             IconButton(onClick = onOpenPalette) {
                 Icon(Icons.Outlined.Palette, contentDescription = "パレット")
+            }
+            // ページ送りボタン: PAGEモードかつ2ページ以上のときのみ表示
+            if (uiState.mode == com.waju.factory.digitalnote.ui.canvas.CanvasMode.PAGE && uiState.totalPages >= 2) {
+                IconButton(
+                    onClick = onPrevPage,
+                    enabled = uiState.currentPageIndex > 0
+                ) {
+                    Icon(Icons.Outlined.ChevronLeft, contentDescription = "前のページ")
+                }
+                Text(
+                    text = "${uiState.currentPageIndex + 1}/${uiState.totalPages}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                IconButton(
+                    onClick = onNextPage,
+                    enabled = uiState.currentPageIndex < uiState.totalPages - 1
+                ) {
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = "次のページ")
+                }
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Outlined.Tune, contentDescription = "設定")
@@ -147,7 +191,7 @@ internal fun CanvasTopBarSection(
 @Composable
 private fun ToolbarToggleButton(
     selected: Boolean,
-    label: String,
+    // label: String,
     icon: ImageVector,
     onClick: () -> Unit
 ) {
@@ -171,11 +215,11 @@ private fun ToolbarToggleButton(
                 contentDescription = null,
                 tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = label,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelLarge
-            )
+//            Text(
+//                text = label,
+//                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+//                style = MaterialTheme.typography.labelLarge
+//            )
         }
     }
 }

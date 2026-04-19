@@ -22,9 +22,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.waju.factory.digitalnote.domain.filterNotes
 import com.waju.factory.digitalnote.model.NoteItem
 import com.waju.factory.digitalnote.ui.components.NoteCard
 import com.waju.factory.digitalnote.ui.theme.TextSecondary
@@ -33,8 +39,20 @@ import com.waju.factory.digitalnote.ui.theme.TextSecondary
 fun NotesScreen(
     notes: List<NoteItem>,
     modifier: Modifier = Modifier,
-    onOpenNote: (NoteItem) -> Unit
+    onOpenNote: (NoteItem) -> Unit,
+    onLongPressNote: (NoteItem) -> Unit = {}
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val filteredNotes = remember(query, notes) {
+        filterNotes(
+            notes = notes,
+            query = query,
+            handwrittenOnly = false,
+            starredOnly = false,
+            attachmentsOnly = false
+        )
+    }
+
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 280.dp),
         modifier = modifier.fillMaxSize(),
@@ -43,10 +61,10 @@ fun NotesScreen(
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             OutlinedTextField(
-                value = "",
-                onValueChange = {},
-                readOnly = true,
-                placeholder = { Text("ノートを検索...") },
+                value = query,
+                onValueChange = { query = it.replace("\n", " ").replace("\r", "") },
+                singleLine = true,
+                placeholder = { Text("タイトル・付箋テキストを検索...") },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -55,15 +73,16 @@ fun NotesScreen(
             )
         }
 
-        items(notes, key = { it.id }) { note ->
+        items(filteredNotes, key = { it.id }) { note ->
             NoteCard(
                 note = note,
                 modifier = Modifier.padding(horizontal = 8.dp),
-                onClick = { onOpenNote(note) }
+                onClick = { onOpenNote(note) },
+                onLongClick = { onLongPressNote(note) }
             )
         }
 
-        if (notes.isEmpty()) {
+        if (filteredNotes.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Surface(
                     modifier = Modifier

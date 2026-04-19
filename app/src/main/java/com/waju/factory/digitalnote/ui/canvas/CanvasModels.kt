@@ -20,10 +20,21 @@ val LegacyDefaultCanvasPalette = listOf(
     Color(0xFF0EA5E9)
 )
 
+const val DEFAULT_STICKY_NOTE_WIDTH = 180f
+const val DEFAULT_STICKY_NOTE_HEIGHT = 140f
+const val DEFAULT_STICKY_NOTE_FONT_SIZE = 16f
+const val MIN_STICKY_NOTE_WIDTH = 180f
+const val MIN_STICKY_NOTE_HEIGHT = 140f
+const val MAX_STICKY_NOTE_WIDTH = 480f
+const val MAX_STICKY_NOTE_HEIGHT = 420f
+
 enum class DrawingTool {
     PEN,
+    MARKER,
     ERASER,
-    LASER_POINTER
+    LASER_POINTER,
+    TEXT,
+    READONLY
 }
 
 enum class CanvasMode {
@@ -59,6 +70,23 @@ data class DrawStroke(
     val points: List<StrokePoint>
 )
 
+data class StickyNote(
+    val id: Long,
+    val pageIndex: Int,
+    val x: Float,
+    val y: Float,
+    val width: Float = DEFAULT_STICKY_NOTE_WIDTH,
+    val height: Float = DEFAULT_STICKY_NOTE_HEIGHT,
+    val text: String,
+    val color: Color,
+    val fontSize: Float = DEFAULT_STICKY_NOTE_FONT_SIZE
+)
+
+data class LaserTrail(
+    val points: List<StrokePoint>,
+    val createdAtMillis: Long
+)
+
 data class CanvasSettings(
     val mode: CanvasMode = CanvasMode.PAGE,
     val backgroundStyle: CanvasBackgroundStyle = CanvasBackgroundStyle.GRID,
@@ -76,6 +104,8 @@ data class CanvasSettings(
 
 data class CanvasUiState(
     val strokes: List<DrawStroke> = emptyList(),
+    val stickyNotes: List<StickyNote> = emptyList(),
+    val laserTrails: List<LaserTrail> = emptyList(),
     val activePoints: List<StrokePoint> = emptyList(),
     val tool: DrawingTool = DrawingTool.PEN,
     val mode: CanvasMode = CanvasMode.PAGE,
