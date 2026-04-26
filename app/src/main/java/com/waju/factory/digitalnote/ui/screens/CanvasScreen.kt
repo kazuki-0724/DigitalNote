@@ -1,6 +1,7 @@
 package com.waju.factory.digitalnote.ui.screens
 
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -120,10 +121,11 @@ fun CanvasScreen(
     var lastFocusX by rememberSaveable { mutableStateOf(0f) }
     var lastFocusY by rememberSaveable { mutableStateOf(0f) }
     var sidebarOpen by rememberSaveable { mutableStateOf(false) }
-    var textTapStartX by rememberSaveable { mutableStateOf(0f) }
-    var textTapStartY by rememberSaveable { mutableStateOf(0f) }
-    var textTapMoved by rememberSaveable { mutableStateOf(false) }
-    var textTapHandledByCanvas by rememberSaveable { mutableStateOf(false) }
+    var textTouchStartX by rememberSaveable { mutableStateOf(0f) }
+    var textTouchStartY by rememberSaveable { mutableStateOf(0f) }
+    var textTouchStartTime by rememberSaveable { mutableStateOf(0L) }
+    var textTouchMoved by rememberSaveable { mutableStateOf(false) }
+    var textTouchHandledByCanvas by rememberSaveable { mutableStateOf(false) }
     var selectedStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var transformStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var styleStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -172,6 +174,7 @@ fun CanvasScreen(
     }
     val safePaletteIndex = uiState.selectedColorIndex.coerceIn(0, uiState.palette.lastIndex.coerceAtLeast(0))
     val editingColor = uiState.palette.getOrElse(safePaletteIndex) { Color.Black }
+    val longPressTimeoutMillis = ViewConfiguration.getLongPressTimeout().toLong()
 
     Row(
         modifier = modifier
@@ -244,6 +247,10 @@ fun CanvasScreen(
 
                             when (event.actionMasked) {
                                 MotionEvent.ACTION_POINTER_DOWN -> {
+                                    if (uiState.tool == DrawingTool.TEXT) {
+                                        textTouchHandledByCanvas = false
+                                        textTouchMoved = true
+                                    }
                                     if (event.pointerCount >= 2) {
                                         inTransformGesture = true
                                         lastSpan = calculateSpan(event)
@@ -256,14 +263,14 @@ fun CanvasScreen(
 
                                 MotionEvent.ACTION_MOVE -> {
                                     if (uiState.tool == DrawingTool.TEXT && event.pointerCount == 1) {
-                                        if (!textTapHandledByCanvas) {
+                                        if (!textTouchHandledByCanvas) {
                                             return@pointerInteropFilter false
                                         }
-                                        if (!textTapMoved) {
-                                            val dx = abs(event.x - textTapStartX)
-                                            val dy = abs(event.y - textTapStartY)
+                                        if (!textTouchMoved) {
+                                            val dx = abs(event.x - textTouchStartX)
+                                            val dy = abs(event.y - textTouchStartY)
                                             if (dx >= 10f || dy >= 10f) {
-                                                textTapMoved = true
+                                                textTouchMoved = true
                                             }
                                         }
                                         return@pointerInteropFilter true
@@ -312,17 +319,18 @@ fun CanvasScreen(
                                 MotionEvent.ACTION_DOWN -> {
                                     if (uiState.tool == DrawingTool.TEXT) {
                                         if (styleStickyNoteId != null) {
-                                            textTapHandledByCanvas = false
+                                            textTouchHandledByCanvas = false
                                             return@pointerInteropFilter false
                                         }
-                                        textTapStartX = event.x
-                                        textTapStartY = event.y
-                                        textTapMoved = false
+                                        textTouchStartX = event.x
+                                        textTouchStartY = event.y
+                                        textTouchStartTime = event.eventTime
+                                        textTouchMoved = false
                                         val world = toWorldPoint(event.x, event.y, uiState)
                                         val tappedNoteId = findStickyNoteAt(world, visibleStickyNotes)
-                                        textTapHandledByCanvas = tappedNoteId == null
+                                        textTouchHandledByCanvas = tappedNoteId == null
                                         // 既存付箋のタップは子Composableへ渡し、ヘッダーボタンのクリックを優先する。
-                                        return@pointerInteropFilter textTapHandledByCanvas
+                                        return@pointerInteropFilter textTouchHandledByCanvas
                                     }
 
                                     if (!inTransformGesture && canHandleDrawInput(event, uiState.inputMode)) {
@@ -332,40 +340,43 @@ fun CanvasScreen(
                                 }
 
                                 MotionEvent.ACTION_UP -> {
-                                    if (uiState.tool == DrawingTool.TEXT && !textTapHandledByCanvas) {
+                                    if (uiState.tool == DrawingTool.TEXT && !textTouchHandledByCanvas) {
                                         return@pointerInteropFilter false
                                     }
 
-                                    if (uiState.tool == DrawingTool.TEXT && !textTapMoved && canHandleDrawInput(event, uiState.inputMode)) {
+                                    if (uiState.tool == DrawingTool.TEXT) {
                                         val world = toWorldPoint(event.x, event.y, uiState)
                                         val tappedNoteId = findStickyNoteAt(world, visibleStickyNotes)
-                                        if (tappedNoteId == null) {
-                                            if (selectedStickyNoteId != null || transformStickyNoteId != null || styleStickyNoteId != null) {
-                                                // まずは付箋の選択/編集状態を解除し、空白タップ1回目で新規作成しない。
-                                                selectedStickyNoteId = null
-                                                transformStickyNoteId = null
-                                                styleStickyNoteId = null
-                                            } else {
-                                                val createdId = onAddStickyNote(world.x, world.y)
-                                                selectedStickyNoteId = createdId
-                                                transformStickyNoteId = null
-                                                styleStickyNoteId = null
-                                            }
-                                        } else {
+                                        val isSingleFingerLongPress =
+                                            event.pointerCount == 1 &&
+                                                event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER &&
+                                                !textTouchMoved &&
+                                                (event.eventTime - textTouchStartTime) >= longPressTimeoutMillis
+
+                                        if (tappedNoteId != null) {
                                             selectedStickyNoteId = tappedNoteId
+                                        } else if (isSingleFingerLongPress) {
+                                            val createdId = onAddStickyNote(world.x, world.y)
+                                            selectedStickyNoteId = createdId
+                                            transformStickyNoteId = null
+                                            styleStickyNoteId = null
+                                        } else {
+                                            selectedStickyNoteId = null
+                                            transformStickyNoteId = null
+                                            styleStickyNoteId = null
                                         }
-                                        textTapHandledByCanvas = false
+                                        textTouchHandledByCanvas = false
                                         return@pointerInteropFilter true
                                     }
 
-                                    textTapHandledByCanvas = false
+                                    textTouchHandledByCanvas = false
 
                                     inTransformGesture = false
                                     onStrokeEnd()
                                 }
 
                                 MotionEvent.ACTION_CANCEL -> {
-                                    textTapHandledByCanvas = false
+                                    textTouchHandledByCanvas = false
                                     inTransformGesture = false
                                     onStrokeCancel()
                                 }
@@ -519,6 +530,9 @@ private fun StickyNoteItem(
     val screenPos = toScreenPoint(Offset(note.x, note.y), uiState)
     val focusRequester = remember { FocusRequester() }
     val canEditText = isSelected && !isTransformEnabled
+    val textZoomRatio = (uiState.scale / STICKY_NOTE_TEXT_BASE_SCALE).coerceAtLeast(0.1f)
+    val effectiveFontSizeSp = note.fontSize * textZoomRatio
+    val effectiveLineHeightSp = (note.fontSize + 6f) * textZoomRatio
 
     LaunchedEffect(canEditText) {
         if (canEditText) {
@@ -665,8 +679,8 @@ private fun StickyNoteItem(
                                         .verticalScroll(scrollState),
                                     textStyle = TextStyle(
                                         color = note.color,
-                                        fontSize = note.fontSize.sp,
-                                        lineHeight = (note.fontSize + 6f).sp
+                                        fontSize = effectiveFontSizeSp.sp,
+                                        lineHeight = effectiveLineHeightSp.sp
                                     ),
                                     cursorBrush = SolidColor(note.color),
                                     decorationBox = { innerTextField ->
@@ -674,7 +688,7 @@ private fun StickyNoteItem(
                                             Text(
                                                 text = "ここにそのまま入力",
                                                 color = note.color.copy(alpha = 0.45f),
-                                                fontSize = note.fontSize.sp
+                                                fontSize = effectiveFontSizeSp.sp
                                             )
                                         }
                                         innerTextField()
@@ -684,8 +698,8 @@ private fun StickyNoteItem(
                                 Text(
                                     text = note.text.ifBlank { "ここにそのまま入力" },
                                     color = if (note.text.isBlank()) note.color.copy(alpha = 0.45f) else note.color,
-                                    fontSize = note.fontSize.sp,
-                                    lineHeight = (note.fontSize + 6f).sp,
+                                    fontSize = effectiveFontSizeSp.sp,
+                                    lineHeight = effectiveLineHeightSp.sp,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -817,6 +831,7 @@ private fun StickyNoteStyleEditor(
 }
 
 private const val LASER_TRAIL_KEEP_MS = 2_000L
+private const val STICKY_NOTE_TEXT_BASE_SCALE = 0.6f
 
 private fun findStickyNoteAt(world: Offset, stickyNotes: List<StickyNote>): Long? {
     return stickyNotes.lastOrNull { note ->

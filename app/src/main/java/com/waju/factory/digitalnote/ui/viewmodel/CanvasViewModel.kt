@@ -30,7 +30,7 @@ class CanvasViewModel(
     private val noteId: Int
 ) : ViewModel() {
     companion object {
-        private const val MIN_SCALE = 0.2f
+        private const val MIN_SCALE = 0.6f
         private const val MAX_SCALE = 3.0f
         private const val TRANSFORM_SAVE_DEBOUNCE_MS = 200L
         private const val LASER_TRAIL_KEEP_MS = 2_000L
