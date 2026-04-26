@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.Flow
 
 data class NoteSearchTextRow(
     val noteId: Int,
-    val searchableText: String?
+    val searchableText: String?,
+    val stickyCount: Int
 )
 
 @Dao
@@ -21,7 +22,7 @@ interface CanvasTextBoxDao {
     @Query("DELETE FROM text_boxes WHERE noteId = :noteId")
     suspend fun deleteByNoteId(noteId: Int)
 
-    @Query("SELECT noteId, GROUP_CONCAT(text, ' ') AS searchableText FROM text_boxes GROUP BY noteId")
+    @Query("SELECT noteId, GROUP_CONCAT(text, ' ') AS searchableText, COUNT(*) AS stickyCount FROM text_boxes GROUP BY noteId")
     fun observeSearchableText(): Flow<List<NoteSearchTextRow>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

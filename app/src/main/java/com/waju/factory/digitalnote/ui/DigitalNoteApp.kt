@@ -1,5 +1,7 @@
 package com.waju.factory.digitalnote.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -49,7 +51,7 @@ fun DigitalNoteApp() {
     val context = LocalContext.current
     val repository = remember {
         val database = AppDatabase.getInstance(context)
-        NoteRepository(database.noteDao(), database.strokeDao(), database.textBoxDao())
+        NoteRepository(database.noteDao(), database.strokeDao(), database.textBoxDao(), database.imageDao())
     }
 
     val notesViewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
@@ -71,6 +73,7 @@ fun DigitalNoteApp() {
     var editingNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
     var editingNoteTitle by rememberSaveable { mutableStateOf("") }
     var editingNoteCoverColorIndex by rememberSaveable { mutableStateOf(0) }
+    var canvasSettingsOpenRequestKey by rememberSaveable { mutableStateOf(0) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -85,6 +88,9 @@ fun DigitalNoteApp() {
                             popUpTo(AppRoute.Notes.route) { inclusive = false }
                             launchSingleTop = true
                         }
+                    },
+                    onOpenSettings = {
+                        canvasSettingsOpenRequestKey += 1
                     }
                 )
                 else -> HomeTopBar()
@@ -136,9 +142,17 @@ fun DigitalNoteApp() {
                     factory = CanvasViewModelFactory(repository, noteId)
                 )
                 val canvasState by canvasViewModel.uiState.collectAsStateWithLifecycle()
+                val pickImageLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.GetContent()
+                ) { uri ->
+                    if (uri != null) {
+                        canvasViewModel.importImageFromUri(context, uri)
+                    }
+                }
 
                 CanvasScreen(
                     uiState = canvasState,
+                    settingsOpenRequestKey = canvasSettingsOpenRequestKey,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -151,6 +165,7 @@ fun DigitalNoteApp() {
                     onAddPage = canvasViewModel::addPage,
                     onGoToPage = canvasViewModel::goToPage,
                     onColorChanged = canvasViewModel::onColorChanged,
+                    onOpenImagePicker = { pickImageLauncher.launch("image/*") },
                     onPaletteColorChanged = canvasViewModel::onPaletteColorChanged,
                     onStrokeWidthChanged = canvasViewModel::onStrokeWidthChanged,
                     onSensitivityChanged = canvasViewModel::onSensitivityChanged,
@@ -165,6 +180,8 @@ fun DigitalNoteApp() {
                     onUpdateStickyNoteText = canvasViewModel::updateStickyNoteText,
                     onMoveStickyNote = canvasViewModel::moveStickyNote,
                     onResizeStickyNote = canvasViewModel::resizeStickyNote,
+                    onMoveImage = canvasViewModel::moveImage,
+                    onResizeImage = canvasViewModel::resizeImage,
                     onUpdateStickyNoteStyle = canvasViewModel::updateStickyNoteStyle,
                     onDeleteStickyNote = canvasViewModel::deleteStickyNote,
                     onToggleReadOnly = canvasViewModel::toggleReadOnly,

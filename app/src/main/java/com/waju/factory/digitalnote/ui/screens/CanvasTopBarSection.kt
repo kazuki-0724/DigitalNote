@@ -26,10 +26,9 @@ import androidx.compose.material.icons.outlined.Draw
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.EditOff
 import androidx.compose.material.icons.outlined.FilterCenterFocus
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.TextFields
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -54,7 +53,7 @@ internal fun CanvasTopBarSection(
     onClear: () -> Unit,
     onColorChanged: (Int) -> Unit,
     onOpenPalette: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenImagePicker: () -> Unit,
     onToggleSidebar: () -> Unit,
     onToggleReadOnly: () -> Unit = {},
     onPrevPage: () -> Unit = {},
@@ -100,11 +99,10 @@ internal fun CanvasTopBarSection(
                 icon = Icons.Outlined.EditOff,
                 onClick = { onToolChanged(DrawingTool.READONLY) }
             )
-            FilterChip(
+            ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.LASER_POINTER,
                 onClick = { onToolChanged(DrawingTool.LASER_POINTER) },
-                label = {},
-                leadingIcon = { Icon(Icons.Outlined.FilterCenterFocus, contentDescription = null) }
+                icon = Icons.Outlined.FilterCenterFocus
             )
 
             IconButton(onClick = onUndo) {
@@ -134,6 +132,9 @@ internal fun CanvasTopBarSection(
             IconButton(onClick = onOpenPalette) {
                 Icon(Icons.Outlined.Palette, contentDescription = "パレット")
             }
+            IconButton(onClick = onOpenImagePicker) {
+                Icon(Icons.Outlined.Image, contentDescription = "画像を挿入")
+            }
             // ページ送りボタン: PAGEモードかつ2ページ以上のときのみ表示
             if (uiState.mode == com.waju.factory.digitalnote.ui.canvas.CanvasMode.PAGE && uiState.totalPages >= 2) {
                 IconButton(
@@ -153,9 +154,6 @@ internal fun CanvasTopBarSection(
                 ) {
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "次のページ")
                 }
-            }
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Outlined.Tune, contentDescription = "設定")
             }
         }
 

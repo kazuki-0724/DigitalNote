@@ -1,23 +1,35 @@
 package com.waju.factory.digitalnote.data.repository
 
+import android.content.Context
+import android.os.Build
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.compose.ui.graphics.Color
+import com.waju.factory.digitalnote.data.local.dao.CanvasImageDao
+import com.waju.factory.digitalnote.data.local.dao.NoteImageCountRow
 import com.waju.factory.digitalnote.data.local.dao.CanvasTextBoxDao
 import com.waju.factory.digitalnote.data.local.dao.NoteDao
 import com.waju.factory.digitalnote.data.local.dao.StrokeDao
+import com.waju.factory.digitalnote.data.local.entity.CanvasImageEntity
 import com.waju.factory.digitalnote.data.local.entity.CanvasTextBoxEntity
 import com.waju.factory.digitalnote.data.local.entity.NoteEntity
 import com.waju.factory.digitalnote.data.local.entity.StrokeEntity
+import com.waju.factory.digitalnote.ui.canvas.CanvasImage
 import com.waju.factory.digitalnote.model.NoteItem
 import com.waju.factory.digitalnote.ui.canvas.CanvasBackgroundStyle
 import com.waju.factory.digitalnote.ui.canvas.CanvasInputMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasSettings
+import com.waju.factory.digitalnote.ui.canvas.CropRect
 import com.waju.factory.digitalnote.ui.canvas.DefaultCanvasPalette
 import com.waju.factory.digitalnote.ui.canvas.DrawStroke
 import com.waju.factory.digitalnote.ui.canvas.DrawingTool
 import com.waju.factory.digitalnote.ui.canvas.StickyNote
 import com.waju.factory.digitalnote.ui.canvas.StrokePoint
 import com.waju.factory.digitalnote.ui.theme.NoteCoverColors
+import java.io.File
+import java.io.FileOutputStream
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -25,7 +37,8 @@ import kotlinx.coroutines.flow.map
 class NoteRepository(
     private val noteDao: NoteDao,
     private val strokeDao: StrokeDao,
-    private val textBoxDao: CanvasTextBoxDao
+    private val textBoxDao: CanvasTextBoxDao,
+    private val imageDao: CanvasImageDao
 ) {
     suspend fun createNote(title: String, coverColor: Color = NoteCoverColors.first()): Int {
         val newId = (noteDao.maxId() ?: 0) + 1
@@ -61,13 +74,24 @@ class NoteRepository(
 
     fun observeNotes(): Flow<List<NoteItem>> = combine(
         noteDao.observeAll(),
-        textBoxDao.observeSearchableText()
-    ) { entities, searchableRows ->
+        textBoxDao.observeSearchableText(),
+        imageDao.observeImageCounts()
+    ) { entities, searchableRows, imageRows ->
         val searchableTextByNoteId = searchableRows.associate { row ->
             row.noteId to (row.searchableText.orEmpty())
         }
+        val stickyCountByNoteId = searchableRows.associate { row ->
+            row.noteId to row.stickyCount
+        }
+        val imageCountByNoteId = imageRows.associate { row ->
+            row.noteId to row.imageCount
+        }
         entities.map { entity ->
-            entity.toModel(searchableText = searchableTextByNoteId[entity.id].orEmpty())
+            val hasAttachment = (stickyCountByNoteId[entity.id] ?: 0) > 0 || (imageCountByNoteId[entity.id] ?: 0) > 0
+            entity.toModel(
+                searchableText = searchableTextByNoteId[entity.id].orEmpty(),
+                hasAttachmentOverride = hasAttachment
+            )
         }
     }
 
@@ -161,8 +185,97 @@ class NoteRepository(
         if (!noteExists) return
         val entities = stickyNotes.map { it.toEntity(noteId) }
         textBoxDao.replaceByNoteId(noteId, entities)
+        updateHasAttachmentFlag(noteId)
     }
 
+    suspend fun getCanvasImages(noteId: Int): List<CanvasImage> {
+        return imageDao.getByNoteId(noteId).map { it.toModel() }
+    }
+
+    suspend fun saveCanvasImages(noteId: Int, images: List<CanvasImage>) {
+        val noteExists = noteDao.getById(noteId) != null
+        if (!noteExists) return
+
+        val existing = imageDao.getByNoteId(noteId)
+        val entities = images.map { it.toEntity(noteId) }
+        imageDao.replaceByNoteId(noteId, entities)
+
+        val keptPaths = entities.map { it.localPath }.toSet()
+        val removedPaths = existing
+            .map { it.localPath }
+            .filterNot { it in keptPaths }
+            .toSet()
+        removedPaths.forEach { deleteFileSilently(it) }
+
+        updateHasAttachmentFlag(noteId)
+    }
+
+    suspend fun importImageFromUri(
+        context: Context,
+        noteId: Int,
+        sourceUri: Uri,
+        pageIndex: Int,
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float
+    ): CanvasImage? {
+        val imageFile = copyAndCompressImage(context = context, sourceUri = sourceUri) ?: return null
+        val current = getCanvasImages(noteId)
+        val nextId = (current.maxOfOrNull { it.id } ?: 0L) + 1L
+        val image = CanvasImage(
+            id = nextId,
+            pageIndex = pageIndex,
+            localPath = imageFile.absolutePath,
+            x = x,
+            y = y,
+            width = width,
+            height = height,
+            rotationDeg = 0f,
+            cropRect = CropRect(0f, 0f, 1f, 1f)
+        )
+        saveCanvasImages(noteId, current + image)
+        return image
+    }
+
+    private suspend fun updateHasAttachmentFlag(noteId: Int) {
+        val note = noteDao.getById(noteId) ?: return
+        val stickyCount = textBoxDao.getByNoteId(noteId).size
+        val imageCount = imageDao.getByNoteId(noteId).size
+        val hasAttachment = stickyCount > 0 || imageCount > 0
+        if (note.hasAttachment != hasAttachment) {
+            noteDao.update(note.copy(hasAttachment = hasAttachment))
+        }
+    }
+
+}
+
+private fun copyAndCompressImage(context: Context, sourceUri: Uri): File? {
+    val bitmap = context.contentResolver.openInputStream(sourceUri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+    val imagesDir = File(context.filesDir, "canvas_images")
+    if (!imagesDir.exists()) {
+        imagesDir.mkdirs()
+    }
+    val targetFile = File(imagesDir, "img_${System.currentTimeMillis()}.webp")
+    val compressFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Bitmap.CompressFormat.WEBP_LOSSY
+    } else {
+        @Suppress("DEPRECATION")
+        Bitmap.CompressFormat.WEBP
+    }
+    return runCatching {
+        FileOutputStream(targetFile).use { output ->
+            bitmap.compress(compressFormat, 85, output)
+        }
+        targetFile
+    }.getOrNull()
+}
+
+private fun deleteFileSilently(path: String) {
+    runCatching {
+        val file = File(path)
+        if (file.exists()) file.delete()
+    }
 }
 
 private fun encodeColors(colors: List<Color>): String {
@@ -202,7 +315,7 @@ private fun decodePoints(encoded: String): List<StrokePoint> {
     }
 }
 
-private fun NoteEntity.toModel(searchableText: String = ""): NoteItem {
+private fun NoteEntity.toModel(searchableText: String = "", hasAttachmentOverride: Boolean? = null): NoteItem {
     val palette = decodeColors(paletteCsv, DefaultCanvasPalette)
     val tones = decodeColors(tonesCsv, deriveTones(palette))
 
@@ -218,7 +331,7 @@ private fun NoteEntity.toModel(searchableText: String = ""): NoteItem {
         searchableText = searchableText,
         handwritten = handwritten,
         starred = starred,
-        hasAttachment = hasAttachment
+        hasAttachment = hasAttachmentOverride ?: hasAttachment
     )
 }
 
@@ -297,6 +410,25 @@ private fun CanvasTextBoxEntity.toModel(): StickyNote {
     )
 }
 
+private fun CanvasImageEntity.toModel(): CanvasImage {
+    return CanvasImage(
+        id = id,
+        pageIndex = pageIndex,
+        localPath = localPath,
+        x = x,
+        y = y,
+        width = width,
+        height = height,
+        rotationDeg = rotationDeg,
+        cropRect = CropRect(
+            left = cropLeft,
+            top = cropTop,
+            right = cropRight,
+            bottom = cropBottom
+        )
+    )
+}
+
 private fun StickyNote.toEntity(noteId: Int): CanvasTextBoxEntity {
     return CanvasTextBoxEntity(
         id = id,
@@ -309,6 +441,24 @@ private fun StickyNote.toEntity(noteId: Int): CanvasTextBoxEntity {
         text = text,
         colorArgb = color.value.toLong(),
         fontSize = fontSize
+    )
+}
+
+private fun CanvasImage.toEntity(noteId: Int): CanvasImageEntity {
+    return CanvasImageEntity(
+        id = id,
+        noteId = noteId,
+        pageIndex = pageIndex,
+        localPath = localPath,
+        x = x,
+        y = y,
+        width = width,
+        height = height,
+        rotationDeg = rotationDeg,
+        cropLeft = cropRect.left,
+        cropTop = cropRect.top,
+        cropRight = cropRect.right,
+        cropBottom = cropRect.bottom
     )
 }
 

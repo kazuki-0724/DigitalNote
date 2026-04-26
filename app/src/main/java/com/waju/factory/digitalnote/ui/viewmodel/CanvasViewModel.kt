@@ -1,10 +1,13 @@
 package com.waju.factory.digitalnote.ui.viewmodel
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.graphics.Color
 import com.waju.factory.digitalnote.data.repository.NoteRepository
 import com.waju.factory.digitalnote.ui.canvas.CanvasBackgroundStyle
+import com.waju.factory.digitalnote.ui.canvas.CanvasImage
 import com.waju.factory.digitalnote.ui.canvas.CanvasInputMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasSettings
@@ -54,14 +57,18 @@ class CanvasViewModel(
     private var isPersistingCanvasSettings = false
     private var pendingPersistStickyNotes: List<StickyNote>? = null
     private var isPersistingStickyNotes = false
+    private var pendingPersistImages: List<CanvasImage>? = null
+    private var isPersistingImages = false
     private var transformPersistJob: Job? = null
     private var laserCleanupJob: Job? = null
     private var nextStickyNoteId = 1L
+    private var nextImageId = 1L
 
     init {
         loadCanvasSettings()
         loadInitialStrokes()
         loadStickyNotes()
+        loadImages()
     }
 
     private fun loadCanvasSettings() {
@@ -117,6 +124,14 @@ class CanvasViewModel(
         }
     }
 
+    private fun loadImages() {
+        viewModelScope.launch {
+            val loaded = repository.getCanvasImages(noteId)
+            nextImageId = (loaded.maxOfOrNull { it.id } ?: 0L) + 1L
+            _uiState.update { it.copy(images = loaded) }
+        }
+    }
+
     fun onToolChanged(tool: DrawingTool) {
         _uiState.update { it.copy(tool = tool, activePoints = emptyList()) }
     }
@@ -167,6 +182,107 @@ class CanvasViewModel(
             })
         }
         persistStickyNotes(_uiState.value.stickyNotes)
+    }
+
+    fun addImage(localPath: String, x: Float, y: Float, width: Float, height: Float): Long {
+        val createdId = nextImageId++
+        _uiState.update { state ->
+            val targetPage = currentContextPage(state)
+            state.copy(
+                images = state.images + CanvasImage(
+                    id = createdId,
+                    pageIndex = targetPage,
+                    localPath = localPath,
+                    x = x,
+                    y = y,
+                    width = width,
+                    height = height
+                )
+            )
+        }
+        persistImages(_uiState.value.images)
+        return createdId
+    }
+
+    fun moveImage(id: Long, newX: Float, newY: Float) {
+        _uiState.update { state ->
+            state.copy(images = state.images.map { image ->
+                if (image.id == id) image.copy(x = newX, y = newY) else image
+            })
+        }
+        persistImages(_uiState.value.images)
+    }
+
+    fun resizeImage(id: Long, newWidth: Float, newHeight: Float) {
+        _uiState.update { state ->
+            state.copy(images = state.images.map { image ->
+                if (image.id == id) {
+                    image.copy(
+                        width = newWidth.coerceAtLeast(80f),
+                        height = newHeight.coerceAtLeast(80f)
+                    )
+                } else {
+                    image
+                }
+            })
+        }
+        persistImages(_uiState.value.images)
+    }
+
+    fun rotateImage(id: Long, rotationDeg: Float) {
+        _uiState.update { state ->
+            state.copy(images = state.images.map { image ->
+                if (image.id == id) image.copy(rotationDeg = rotationDeg) else image
+            })
+        }
+        persistImages(_uiState.value.images)
+    }
+
+    fun updateImageCrop(id: Long, left: Float, top: Float, right: Float, bottom: Float) {
+        _uiState.update { state ->
+            state.copy(images = state.images.map { image ->
+                if (image.id == id) {
+                    image.copy(
+                        cropRect = image.cropRect.copy(
+                            left = left.coerceIn(0f, 1f),
+                            top = top.coerceIn(0f, 1f),
+                            right = right.coerceIn(0f, 1f),
+                            bottom = bottom.coerceIn(0f, 1f)
+                        )
+                    )
+                } else {
+                    image
+                }
+            })
+        }
+        persistImages(_uiState.value.images)
+    }
+
+    fun deleteImage(id: Long) {
+        _uiState.update { state ->
+            state.copy(images = state.images.filterNot { it.id == id })
+        }
+        persistImages(_uiState.value.images)
+    }
+
+    fun importImageFromUri(context: Context, sourceUri: Uri) {
+        viewModelScope.launch {
+            val state = _uiState.value
+            val targetPage = currentContextPage(state)
+            val created = repository.importImageFromUri(
+                context = context,
+                noteId = noteId,
+                sourceUri = sourceUri,
+                pageIndex = targetPage,
+                x = 140f,
+                y = 140f,
+                width = 640f,
+                height = 420f
+            ) ?: return@launch
+
+            nextImageId = maxOf(nextImageId, created.id + 1L)
+            _uiState.update { ui -> ui.copy(images = ui.images + created) }
+        }
     }
 
     fun toggleReadOnly() {
@@ -432,7 +548,8 @@ class CanvasViewModel(
         val contextPage = currentContextPage(state)
         val removed = state.strokes.filter { it.pageIndex == contextPage }
         val removedStickyNotes = state.stickyNotes.filter { it.pageIndex == contextPage }
-        if (removed.isEmpty() && removedStickyNotes.isEmpty()) return
+        val removedImages = state.images.filter { it.pageIndex == contextPage }
+        if (removed.isEmpty() && removedStickyNotes.isEmpty() && removedImages.isEmpty()) return
 
         redoStack.addAll(removed)
         val updated = state.strokes.filterNot { it.pageIndex == contextPage }
@@ -440,11 +557,13 @@ class CanvasViewModel(
             it.copy(
                 strokes = updated,
                 stickyNotes = it.stickyNotes.filterNot { note -> note.pageIndex == contextPage },
+                images = it.images.filterNot { image -> image.pageIndex == contextPage },
                 activePoints = emptyList()
             )
         }
         persist(updated)
         persistStickyNotes(_uiState.value.stickyNotes)
+        persistImages(_uiState.value.images)
     }
 
     private fun currentContextPage(state: CanvasUiState): Int {
@@ -538,6 +657,21 @@ class CanvasViewModel(
                 repository.saveStickyNotes(noteId = noteId, stickyNotes = next)
             }
             isPersistingStickyNotes = false
+        }
+    }
+
+    private fun persistImages(images: List<CanvasImage>) {
+        pendingPersistImages = images
+        if (isPersistingImages) return
+
+        viewModelScope.launch {
+            isPersistingImages = true
+            while (isActive) {
+                val next = pendingPersistImages ?: break
+                pendingPersistImages = null
+                repository.saveCanvasImages(noteId = noteId, images = next)
+            }
+            isPersistingImages = false
         }
     }
 }

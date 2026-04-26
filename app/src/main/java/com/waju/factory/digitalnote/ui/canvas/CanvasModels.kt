@@ -82,6 +82,25 @@ data class StickyNote(
     val fontSize: Float = DEFAULT_STICKY_NOTE_FONT_SIZE
 )
 
+data class CropRect(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)
+
+data class CanvasImage(
+    val id: Long,
+    val pageIndex: Int,
+    val localPath: String,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
+    val rotationDeg: Float = 0f,
+    val cropRect: CropRect = CropRect(0f, 0f, 1f, 1f)
+)
+
 data class LaserTrail(
     val points: List<StrokePoint>,
     val createdAtMillis: Long
@@ -89,8 +108,8 @@ data class LaserTrail(
 
 data class CanvasSettings(
     val mode: CanvasMode = CanvasMode.PAGE,
-    val backgroundStyle: CanvasBackgroundStyle = CanvasBackgroundStyle.GRID,
-    val inputMode: CanvasInputMode = CanvasInputMode.PEN_ONLY,
+    val backgroundStyle: CanvasBackgroundStyle = CanvasBackgroundStyle.RULED,
+    val inputMode: CanvasInputMode = CanvasInputMode.FINGER_ONLY,
     val totalPages: Int = 1,
     val currentPageIndex: Int = 0,
     val palette: List<Color> = DefaultCanvasPalette,
@@ -105,12 +124,13 @@ data class CanvasSettings(
 data class CanvasUiState(
     val strokes: List<DrawStroke> = emptyList(),
     val stickyNotes: List<StickyNote> = emptyList(),
+    val images: List<CanvasImage> = emptyList(),
     val laserTrails: List<LaserTrail> = emptyList(),
     val activePoints: List<StrokePoint> = emptyList(),
     val tool: DrawingTool = DrawingTool.PEN,
     val mode: CanvasMode = CanvasMode.PAGE,
-    val backgroundStyle: CanvasBackgroundStyle = CanvasBackgroundStyle.GRID,
-    val inputMode: CanvasInputMode = CanvasInputMode.PEN_ONLY,
+    val backgroundStyle: CanvasBackgroundStyle = CanvasBackgroundStyle.RULED,
+    val inputMode: CanvasInputMode = CanvasInputMode.FINGER_ONLY,
     val totalPages: Int = 1,
     val currentPageIndex: Int = 0,
     val scale: Float = 1f,

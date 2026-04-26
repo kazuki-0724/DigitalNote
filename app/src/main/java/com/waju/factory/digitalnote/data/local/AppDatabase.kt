@@ -6,8 +6,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.waju.factory.digitalnote.data.local.dao.CanvasTextBoxDao
+import com.waju.factory.digitalnote.data.local.dao.CanvasImageDao
 import com.waju.factory.digitalnote.data.local.dao.NoteDao
 import com.waju.factory.digitalnote.data.local.dao.StrokeDao
+import com.waju.factory.digitalnote.data.local.entity.CanvasImageEntity
 import com.waju.factory.digitalnote.data.local.entity.CanvasTextBoxEntity
 import com.waju.factory.digitalnote.data.local.entity.NoteEntity
 import com.waju.factory.digitalnote.data.local.entity.StrokeEntity
@@ -19,14 +21,15 @@ import com.waju.factory.digitalnote.ui.canvas.LegacyDefaultCanvasPalette
 import com.waju.factory.digitalnote.ui.theme.NoteCoverColors
 
 @Database(
-    entities = [NoteEntity::class, StrokeEntity::class, CanvasTextBoxEntity::class],
-    version = 8,
+    entities = [NoteEntity::class, StrokeEntity::class, CanvasTextBoxEntity::class, CanvasImageEntity::class],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun strokeDao(): StrokeDao
     abstract fun textBoxDao(): CanvasTextBoxDao
+    abstract fun imageDao(): CanvasImageDao
 
     companion object {
         private val defaultPaletteCsv = DefaultCanvasPalette.joinToString(",") { it.value.toLong().toString() }
@@ -105,6 +108,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS canvas_images (
+                        id INTEGER PRIMARY KEY NOT NULL,
+                        noteId INTEGER NOT NULL,
+                        pageIndex INTEGER NOT NULL,
+                        localPath TEXT NOT NULL,
+                        x REAL NOT NULL,
+                        y REAL NOT NULL,
+                        width REAL NOT NULL,
+                        height REAL NOT NULL,
+                        rotationDeg REAL NOT NULL,
+                        cropLeft REAL NOT NULL,
+                        cropTop REAL NOT NULL,
+                        cropRight REAL NOT NULL,
+                        cropBottom REAL NOT NULL,
+                        FOREIGN KEY(noteId) REFERENCES notes(id) ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_canvas_images_noteId ON canvas_images(noteId)")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -115,7 +144,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "digital_note.db"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }

@@ -2,6 +2,7 @@ package com.waju.factory.digitalnote.ui.screens
 
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -49,6 +50,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalDensity
@@ -66,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import com.waju.factory.digitalnote.ui.canvas.CanvasBackgroundStyle
 import com.waju.factory.digitalnote.ui.canvas.CanvasDesktopColor
 import com.waju.factory.digitalnote.ui.canvas.CanvasInputMode
+import com.waju.factory.digitalnote.ui.canvas.CanvasImage
 import com.waju.factory.digitalnote.ui.canvas.CanvasMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasUiState
 import com.waju.factory.digitalnote.ui.canvas.DrawStroke
@@ -75,8 +80,11 @@ import com.waju.factory.digitalnote.ui.canvas.StickyNote
 import com.waju.factory.digitalnote.ui.canvas.StrokePoint
 import com.waju.factory.digitalnote.ui.canvas.WHITEBOARD_PAGE_INDEX
 import com.waju.factory.digitalnote.ui.canvas.applyPressureCurve
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -84,6 +92,7 @@ import kotlin.math.sqrt
 fun CanvasScreen(
     uiState: CanvasUiState,
     modifier: Modifier = Modifier,
+    settingsOpenRequestKey: Int = 0,
     onToolChanged: (DrawingTool) -> Unit,
     onModeChanged: (CanvasMode) -> Unit,
     onBackgroundStyleChanged: (CanvasBackgroundStyle) -> Unit,
@@ -93,6 +102,7 @@ fun CanvasScreen(
     onAddPage: () -> Unit,
     onGoToPage: (Int) -> Unit,
     onColorChanged: (Int) -> Unit,
+    onOpenImagePicker: () -> Unit,
     onPaletteColorChanged: (Int, Color) -> Unit,
     onStrokeWidthChanged: (Float) -> Unit,
     onSensitivityChanged: (Float) -> Unit,
@@ -107,6 +117,8 @@ fun CanvasScreen(
     onUpdateStickyNoteText: (id: Long, text: String) -> Unit,
     onMoveStickyNote: (id: Long, newX: Float, newY: Float) -> Unit,
     onResizeStickyNote: (id: Long, newWidth: Float, newHeight: Float) -> Unit,
+    onMoveImage: (id: Long, newX: Float, newY: Float) -> Unit,
+    onResizeImage: (id: Long, newWidth: Float, newHeight: Float) -> Unit,
     onUpdateStickyNoteStyle: (id: Long, color: Color, fontSize: Float) -> Unit,
     onDeleteStickyNote: (id: Long) -> Unit,
     onToggleReadOnly: () -> Unit,
@@ -126,15 +138,25 @@ fun CanvasScreen(
     var textTouchStartTime by rememberSaveable { mutableStateOf(0L) }
     var textTouchMoved by rememberSaveable { mutableStateOf(false) }
     var textTouchHandledByCanvas by rememberSaveable { mutableStateOf(false) }
+    var selectedImageId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var transformStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var styleStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(uiState.tool) {
+        if (uiState.tool != DrawingTool.READONLY) {
+            selectedImageId = null
+        }
         if (uiState.tool != DrawingTool.TEXT) {
             selectedStickyNoteId = null
             transformStickyNoteId = null
             styleStickyNoteId = null
+        }
+    }
+
+    LaunchedEffect(settingsOpenRequestKey) {
+        if (settingsOpenRequestKey > 0) {
+            showSettingsDialog = true
         }
     }
 
@@ -143,6 +165,11 @@ fun CanvasScreen(
         if (selectedStickyNoteId !in noteIds) selectedStickyNoteId = null
         if (transformStickyNoteId !in noteIds) transformStickyNoteId = null
         if (styleStickyNoteId !in noteIds) styleStickyNoteId = null
+    }
+
+    LaunchedEffect(uiState.images) {
+        val imageIds = uiState.images.map { it.id }.toSet()
+        if (selectedImageId !in imageIds) selectedImageId = null
     }
 
     // B5 実寸 (182mm × 257mm) をスクリーン画素数へ変換
@@ -159,6 +186,12 @@ fun CanvasScreen(
         }
     }
     val currentPage = if (uiState.mode == CanvasMode.WHITEBOARD) WHITEBOARD_PAGE_INDEX else uiState.currentPageIndex
+    val visibleImages = uiState.images.filter { it.pageIndex == currentPage }
+    val imageBitmaps = remember(visibleImages.map { it.localPath }) {
+        visibleImages.associate { image ->
+            image.id to loadImageBitmap(image.localPath)
+        }
+    }
     val visibleStickyNotes = uiState.stickyNotes.filter { it.pageIndex == currentPage }
     val nowMillis = System.currentTimeMillis()
     val visibleLaserTrails = uiState.laserTrails.mapNotNull { trail ->
@@ -192,7 +225,7 @@ fun CanvasScreen(
                 onClear = onClear,
                 onColorChanged = onColorChanged,
                 onOpenPalette = { showPaletteDialog = true },
-                onOpenSettings = { showSettingsDialog = true },
+                onOpenImagePicker = onOpenImagePicker,
                 onToggleSidebar = { sidebarOpen = !sidebarOpen },
                 onToggleReadOnly = onToggleReadOnly,
                 onPrevPage = onPrevPage,
@@ -243,7 +276,17 @@ fun CanvasScreen(
                         )
                         .pointerInteropFilter { event ->
                             val isReadOnly = uiState.tool == DrawingTool.READONLY
-                            if (isReadOnly && event.pointerCount < 2) return@pointerInteropFilter true
+                            if (isReadOnly && event.pointerCount < 2) {
+                                val world = toWorldPoint(event.x, event.y, uiState)
+                                val tappedImageId = findImageAt(world, visibleImages)
+                                if (tappedImageId == null) {
+                                    // READONLY中の空白タップは選択解除して親で消費する。
+                                    selectedImageId = null
+                                    return@pointerInteropFilter true
+                                }
+                                // 画像上タッチは子オーバーレイのドラッグ/リサイズに委譲する。
+                                return@pointerInteropFilter false
+                            }
 
                             when (event.actionMasked) {
                                 MotionEvent.ACTION_POINTER_DOWN -> {
@@ -317,6 +360,10 @@ fun CanvasScreen(
                                 }
 
                                 MotionEvent.ACTION_DOWN -> {
+                                    if (uiState.tool == DrawingTool.READONLY) {
+                                        selectedImageId = null
+                                    }
+
                                     if (uiState.tool == DrawingTool.TEXT) {
                                         if (styleStickyNoteId != null) {
                                             textTouchHandledByCanvas = false
@@ -329,6 +376,9 @@ fun CanvasScreen(
                                         val world = toWorldPoint(event.x, event.y, uiState)
                                         val tappedNoteId = findStickyNoteAt(world, visibleStickyNotes)
                                         textTouchHandledByCanvas = tappedNoteId == null
+                                        if (tappedNoteId == null) {
+                                            selectedImageId = null
+                                        }
                                         // 既存付箋のタップは子Composableへ渡し、ヘッダーボタンのクリックを優先する。
                                         return@pointerInteropFilter textTouchHandledByCanvas
                                     }
@@ -420,6 +470,10 @@ fun CanvasScreen(
                                 bottom = pageTop + pageH
                             ) {
                                 drawBackgroundPattern(uiState)
+                                visibleImages.forEach { image ->
+                                    val bitmap = imageBitmaps[image.id] ?: return@forEach
+                                    drawCanvasImage(bitmap = bitmap, image = image, uiState = uiState)
+                                }
                                 visibleStrokes.forEach { stroke ->
                                     drawStroke(stroke = stroke, uiState = uiState)
                                 }
@@ -433,6 +487,10 @@ fun CanvasScreen(
                         } else {
                             // ── WHITEBOARDモード: 既存の無限キャンバス動作 ──
                             drawBackgroundPattern(uiState)
+                            visibleImages.forEach { image ->
+                                val bitmap = imageBitmaps[image.id] ?: return@forEach
+                                drawCanvasImage(bitmap = bitmap, image = image, uiState = uiState)
+                            }
                             visibleStrokes.forEach { stroke ->
                                 drawStroke(stroke = stroke, uiState = uiState)
                             }
@@ -442,6 +500,20 @@ fun CanvasScreen(
                             if (uiState.activePoints.isNotEmpty()) {
                                 drawActiveStroke(uiState)
                             }
+                        }
+                    }
+
+                    visibleImages.forEach { image ->
+                        key("image_overlay_${image.id}") {
+                            CanvasImageTransformOverlay(
+                                image = image,
+                                uiState = uiState,
+                                isSelected = image.id == selectedImageId,
+                                transformEnabled = uiState.tool == DrawingTool.READONLY,
+                                onSelect = { selectedImageId = image.id },
+                                onMove = { newX, newY -> onMoveImage(image.id, newX, newY) },
+                                onResize = { newWidth, newHeight -> onResizeImage(image.id, newWidth, newHeight) }
+                            )
                         }
                     }
 
@@ -496,6 +568,163 @@ fun CanvasScreen(
             )
         }
     }
+}
+
+@Composable
+private fun CanvasImageTransformOverlay(
+    image: CanvasImage,
+    uiState: CanvasUiState,
+    isSelected: Boolean,
+    transformEnabled: Boolean,
+    onSelect: () -> Unit,
+    onMove: (Float, Float) -> Unit,
+    onResize: (Float, Float) -> Unit
+) {
+    var dragScreenDeltaX by remember(image.id) { mutableStateOf(0f) }
+    var dragScreenDeltaY by remember(image.id) { mutableStateOf(0f) }
+    var resizeScreenDeltaX by remember(image.id) { mutableStateOf(0f) }
+    var resizeScreenDeltaY by remember(image.id) { mutableStateOf(0f) }
+    val currentScale by rememberUpdatedState(uiState.scale)
+    val capturedX by rememberUpdatedState(image.x)
+    val capturedY by rememberUpdatedState(image.y)
+    val capturedWidth by rememberUpdatedState(image.width)
+    val capturedHeight by rememberUpdatedState(image.height)
+    val density = LocalDensity.current
+    val screenPos = toScreenPoint(Offset(image.x, image.y), uiState)
+    val previewSize = calculateImageResize(
+        baseWidth = image.width,
+        baseHeight = image.height,
+        deltaScreenX = resizeScreenDeltaX,
+        deltaScreenY = resizeScreenDeltaY,
+        currentScale = uiState.scale
+    )
+    val widthDp = with(density) { (previewSize.width * uiState.scale).toDp() }
+    val heightDp = with(density) { (previewSize.height * uiState.scale).toDp() }
+
+    var overlayModifier = Modifier
+        .offset {
+            IntOffset(
+                x = (screenPos.x + dragScreenDeltaX).roundToInt(),
+                y = (screenPos.y + dragScreenDeltaY).roundToInt()
+            )
+        }
+        .size(width = widthDp, height = heightDp)
+
+    if (transformEnabled && isSelected) {
+        overlayModifier = overlayModifier.pointerInput(image.id, currentScale) {
+            detectDragGestures(
+                onDragStart = {
+                    dragScreenDeltaX = 0f
+                    dragScreenDeltaY = 0f
+                },
+                onDrag = { change, amount ->
+                    change.consume()
+                    dragScreenDeltaX += amount.x
+                    dragScreenDeltaY += amount.y
+                },
+                onDragEnd = {
+                    onMove(
+                        capturedX + dragScreenDeltaX / currentScale,
+                        capturedY + dragScreenDeltaY / currentScale
+                    )
+                    dragScreenDeltaX = 0f
+                    dragScreenDeltaY = 0f
+                },
+                onDragCancel = {
+                    dragScreenDeltaX = 0f
+                    dragScreenDeltaY = 0f
+                }
+            )
+        }
+    }
+
+    overlayModifier = if (transformEnabled) {
+        overlayModifier.clickable(onClick = onSelect)
+    } else {
+        overlayModifier
+    }
+
+    Box(modifier = overlayModifier) {
+        if (isSelected && transformEnabled) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 10.dp, y = 10.dp)
+                    .size(28.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .pointerInput(image.id, currentScale) {
+                        detectDragGestures(
+                            onDragStart = {
+                                resizeScreenDeltaX = 0f
+                                resizeScreenDeltaY = 0f
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                resizeScreenDeltaX += amount.x
+                                resizeScreenDeltaY += amount.y
+                            },
+                            onDragEnd = {
+                                val resized = calculateImageResize(
+                                    baseWidth = capturedWidth,
+                                    baseHeight = capturedHeight,
+                                    deltaScreenX = resizeScreenDeltaX,
+                                    deltaScreenY = resizeScreenDeltaY,
+                                    currentScale = currentScale
+                                )
+                                onResize(
+                                    resized.width,
+                                    resized.height
+                                )
+                                resizeScreenDeltaX = 0f
+                                resizeScreenDeltaY = 0f
+                            },
+                            onDragCancel = {
+                                resizeScreenDeltaX = 0f
+                                resizeScreenDeltaY = 0f
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "┘",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+    }
+}
+
+private data class ImageResizeResult(val width: Float, val height: Float)
+
+private fun calculateImageResize(
+    baseWidth: Float,
+    baseHeight: Float,
+    deltaScreenX: Float,
+    deltaScreenY: Float,
+    currentScale: Float
+): ImageResizeResult {
+    val safeBaseW = baseWidth.coerceAtLeast(1f)
+    val safeBaseH = baseHeight.coerceAtLeast(1f)
+    val worldDeltaW = deltaScreenX / currentScale
+    val worldDeltaH = deltaScreenY / currentScale
+
+    val widthScale = (safeBaseW + worldDeltaW) / safeBaseW
+    val heightScale = (safeBaseH + worldDeltaH) / safeBaseH
+    val primaryScale = if (abs(worldDeltaW) >= abs(worldDeltaH)) widthScale else heightScale
+    val minScale = max(80f / safeBaseW, 80f / safeBaseH)
+    val scale = primaryScale.coerceAtLeast(minScale)
+
+    return ImageResizeResult(
+        width = safeBaseW * scale,
+        height = safeBaseH * scale
+    )
 }
 
 @Composable
@@ -833,9 +1062,59 @@ private fun StickyNoteStyleEditor(
 private const val LASER_TRAIL_KEEP_MS = 2_000L
 private const val STICKY_NOTE_TEXT_BASE_SCALE = 0.6f
 
+private fun loadImageBitmap(localPath: String): ImageBitmap? {
+    val source = File(localPath)
+    if (!source.exists()) return null
+    return BitmapFactory.decodeFile(source.absolutePath)?.asImageBitmap()
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasImage(
+    bitmap: ImageBitmap,
+    image: CanvasImage,
+    uiState: CanvasUiState
+) {
+    val screenTopLeft = toScreenPoint(Offset(image.x, image.y), uiState)
+    val dstWidth = (image.width * uiState.scale).roundToInt().coerceAtLeast(1)
+    val dstHeight = (image.height * uiState.scale).roundToInt().coerceAtLeast(1)
+
+    val crop = image.cropRect
+    val left = min(max(crop.left, 0f), 1f)
+    val top = min(max(crop.top, 0f), 1f)
+    val right = min(max(crop.right, left), 1f)
+    val bottom = min(max(crop.bottom, top), 1f)
+    val srcX = (bitmap.width * left).toInt().coerceIn(0, bitmap.width - 1)
+    val srcY = (bitmap.height * top).toInt().coerceIn(0, bitmap.height - 1)
+    val srcW = (bitmap.width * (right - left)).toInt().coerceAtLeast(1).coerceAtMost(bitmap.width - srcX)
+    val srcH = (bitmap.height * (bottom - top)).toInt().coerceAtLeast(1).coerceAtMost(bitmap.height - srcY)
+
+    withTransform({
+        rotate(
+            degrees = image.rotationDeg,
+            pivot = Offset(
+                x = screenTopLeft.x + dstWidth / 2f,
+                y = screenTopLeft.y + dstHeight / 2f
+            )
+        )
+    }) {
+        drawImage(
+            image = bitmap,
+            srcOffset = IntOffset(srcX, srcY),
+            srcSize = androidx.compose.ui.unit.IntSize(srcW, srcH),
+            dstOffset = IntOffset(screenTopLeft.x.roundToInt(), screenTopLeft.y.roundToInt()),
+            dstSize = androidx.compose.ui.unit.IntSize(dstWidth, dstHeight)
+        )
+    }
+}
+
 private fun findStickyNoteAt(world: Offset, stickyNotes: List<StickyNote>): Long? {
     return stickyNotes.lastOrNull { note ->
         world.x in note.x..(note.x + note.width) && world.y in note.y..(note.y + note.height)
+    }?.id
+}
+
+private fun findImageAt(world: Offset, images: List<CanvasImage>): Long? {
+    return images.lastOrNull { image ->
+        world.x in image.x..(image.x + image.width) && world.y in image.y..(image.y + image.height)
     }?.id
 }
 

@@ -11,12 +11,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Sort
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,7 +64,8 @@ fun HomeTopBar() {
 @Composable
 fun SectionTopBar(
     title: String,
-    onBackToTop: (() -> Unit)? = null
+    onBackToTop: (() -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -88,9 +89,9 @@ fun SectionTopBar(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        if (onBackToTop != null) {
-            TextButton(onClick = onBackToTop) {
-                Text("トップ")
+        if (onOpenSettings != null) {
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Outlined.Tune, contentDescription = "キャンバス設定")
             }
         } else {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {

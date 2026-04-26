@@ -50,7 +50,7 @@ internal fun CanvasSettingsDialog(
                     FilterChip(
                         selected = uiState.mode == CanvasMode.PAGE,
                         onClick = { onModeChanged(CanvasMode.PAGE) },
-                        label = { Text("ページ") }
+                        label = { Text("ノート") }
                     )
                     FilterChip(
                         selected = uiState.mode == CanvasMode.WHITEBOARD,
@@ -80,16 +80,16 @@ internal fun CanvasSettingsDialog(
                 Text("入力モード", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = uiState.inputMode == CanvasInputMode.PEN_ONLY,
-                        onClick = { onInputModeChanged(CanvasInputMode.PEN_ONLY) },
-                        label = { Text("ペン") },
-                        leadingIcon = { Icon(Icons.Outlined.Draw, contentDescription = null) }
-                    )
-                    FilterChip(
                         selected = uiState.inputMode == CanvasInputMode.FINGER_ONLY,
                         onClick = { onInputModeChanged(CanvasInputMode.FINGER_ONLY) },
                         label = { Text("指") },
                         leadingIcon = { Icon(Icons.Outlined.TouchApp, contentDescription = null) }
+                    )
+                    FilterChip(
+                        selected = uiState.inputMode == CanvasInputMode.PEN_ONLY,
+                        onClick = { onInputModeChanged(CanvasInputMode.PEN_ONLY) },
+                        label = { Text("ペン") },
+                        leadingIcon = { Icon(Icons.Outlined.Draw, contentDescription = null) }
                     )
                 }
 
