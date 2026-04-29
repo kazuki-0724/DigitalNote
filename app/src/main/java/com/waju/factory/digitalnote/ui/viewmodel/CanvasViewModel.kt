@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class CanvasViewModel(
     private val repository: NoteRepository,
@@ -217,9 +218,19 @@ class CanvasViewModel(
         _uiState.update { state ->
             state.copy(images = state.images.map { image ->
                 if (image.id == id) {
+                    val safeBaseW = image.width.coerceAtLeast(1f)
+                    val safeBaseH = image.height.coerceAtLeast(1f)
+                    val widthScale = newWidth / safeBaseW
+                    val heightScale = newHeight / safeBaseH
+                    val dominantScale = if (abs(widthScale - 1f) >= abs(heightScale - 1f)) {
+                        widthScale
+                    } else {
+                        heightScale
+                    }
+                    val ratioLockedScale = dominantScale.coerceAtLeast(80f / minOf(safeBaseW, safeBaseH))
                     image.copy(
-                        width = newWidth.coerceAtLeast(80f),
-                        height = newHeight.coerceAtLeast(80f)
+                        width = safeBaseW * ratioLockedScale,
+                        height = safeBaseH * ratioLockedScale
                     )
                 } else {
                     image

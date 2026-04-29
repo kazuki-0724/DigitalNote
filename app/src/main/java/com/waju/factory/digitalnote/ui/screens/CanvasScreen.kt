@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.IntOffset
@@ -142,6 +143,7 @@ fun CanvasScreen(
     var selectedStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var transformStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var styleStickyNoteId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var canvasViewportSize by remember { mutableStateOf(Size.Zero) }
 
     LaunchedEffect(uiState.tool) {
         if (uiState.tool != DrawingTool.READONLY) {
@@ -177,6 +179,23 @@ fun CanvasScreen(
     val density = LocalDensity.current.density
     val b5WidthWorld  = 182f * 160f / 25.4f * density   // px at scale=1.0
     val b5HeightWorld = 257f * 160f / 25.4f * density   // px at scale=1.0
+    val pageFitScale = if (
+        uiState.mode == CanvasMode.PAGE &&
+            canvasViewportSize.width > 0f &&
+            canvasViewportSize.height > 0f
+    ) {
+        min(
+            canvasViewportSize.width / b5WidthWorld,
+            canvasViewportSize.height / b5HeightWorld
+        )
+    } else {
+        1f
+    }
+    val renderUiState = if (uiState.mode == CanvasMode.PAGE) {
+        uiState.copy(scale = (uiState.scale * pageFitScale).coerceAtLeast(0.001f))
+    } else {
+        uiState
+    }
 
     val visibleStrokes = uiState.strokes.filter {
         if (uiState.mode == CanvasMode.WHITEBOARD) {
@@ -261,23 +280,21 @@ fun CanvasScreen(
                 )
             }
 
-            Surface(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = 8.dp),
-                tonalElevation = 2.dp
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            if (uiState.mode == CanvasMode.PAGE) CanvasDesktopColor
-                            else uiState.backgroundColor
-                        )
-                        .pointerInteropFilter { event ->
+                    .background(
+                        if (uiState.mode == CanvasMode.PAGE) CanvasDesktopColor
+                        else uiState.backgroundColor
+                    )
+                    .clipToBounds()
+                    .onSizeChanged { size ->
+                        canvasViewportSize = Size(size.width.toFloat(), size.height.toFloat())
+                    }
+                    .pointerInteropFilter { event ->
                             val isReadOnly = uiState.tool == DrawingTool.READONLY
                             if (isReadOnly && event.pointerCount < 2) {
-                                val world = toWorldPoint(event.x, event.y, uiState)
+                                        val world = toWorldPoint(event.x, event.y, renderUiState)
                                 val tappedImageId = findImageAt(world, visibleImages)
                                 if (tappedImageId == null) {
                                     // READONLY中の空白タップは選択解除して親で消費する。
@@ -335,12 +352,12 @@ fun CanvasScreen(
                                     }
 
                                     if (!inTransformGesture && canHandleDrawInput(event, uiState.inputMode)) {
-                                        val world = toWorldPoint(event.x, event.y, uiState)
+                                        val world = toWorldPoint(event.x, event.y, renderUiState)
                                         for (index in 0 until event.historySize) {
                                             val historical = toWorldPoint(
                                                 event.getHistoricalX(index),
                                                 event.getHistoricalY(index),
-                                                uiState
+                                                renderUiState
                                             )
                                             onStrokeMove(
                                                 historical.x,
@@ -373,7 +390,7 @@ fun CanvasScreen(
                                         textTouchStartY = event.y
                                         textTouchStartTime = event.eventTime
                                         textTouchMoved = false
-                                        val world = toWorldPoint(event.x, event.y, uiState)
+                                        val world = toWorldPoint(event.x, event.y, renderUiState)
                                         val tappedNoteId = findStickyNoteAt(world, visibleStickyNotes)
                                         textTouchHandledByCanvas = tappedNoteId == null
                                         if (tappedNoteId == null) {
@@ -384,7 +401,7 @@ fun CanvasScreen(
                                     }
 
                                     if (!inTransformGesture && canHandleDrawInput(event, uiState.inputMode)) {
-                                        val world = toWorldPoint(event.x, event.y, uiState)
+                                        val world = toWorldPoint(event.x, event.y, renderUiState)
                                         onStrokeStart(world.x, world.y, event.getPressure(0), event.eventTime)
                                     }
                                 }
@@ -395,7 +412,7 @@ fun CanvasScreen(
                                     }
 
                                     if (uiState.tool == DrawingTool.TEXT) {
-                                        val world = toWorldPoint(event.x, event.y, uiState)
+                                        val world = toWorldPoint(event.x, event.y, renderUiState)
                                         val tappedNoteId = findStickyNoteAt(world, visibleStickyNotes)
                                         val isSingleFingerLongPress =
                                             event.pointerCount == 1 &&
@@ -433,14 +450,14 @@ fun CanvasScreen(
                             }
                             true
                         }
-                ) {
+            ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        if (uiState.mode == CanvasMode.PAGE) {
+                        if (renderUiState.mode == CanvasMode.PAGE) {
                             // ── PAGEモード: B5サイズのページを描画 ──
-                            val pageLeft   = uiState.offsetX
-                            val pageTop    = uiState.offsetY
-                            val pageW      = b5WidthWorld  * uiState.scale
-                            val pageH      = b5HeightWorld * uiState.scale
+                            val pageLeft   = renderUiState.offsetX
+                            val pageTop    = renderUiState.offsetY
+                            val pageW      = b5WidthWorld  * renderUiState.scale
+                            val pageH      = b5HeightWorld * renderUiState.scale
 
                             // 影 (drop shadow)
                             drawRect(
@@ -450,7 +467,7 @@ fun CanvasScreen(
                             )
                             // 用紙白背景
                             drawRect(
-                                color   = uiState.backgroundColor,
+                                color   = renderUiState.backgroundColor,
                                 topLeft = Offset(pageLeft, pageTop),
                                 size    = Size(pageW, pageH)
                             )
@@ -469,36 +486,36 @@ fun CanvasScreen(
                                 right  = pageLeft + pageW,
                                 bottom = pageTop + pageH
                             ) {
-                                drawBackgroundPattern(uiState)
+                                drawBackgroundPattern(renderUiState)
                                 visibleImages.forEach { image ->
                                     val bitmap = imageBitmaps[image.id] ?: return@forEach
-                                    drawCanvasImage(bitmap = bitmap, image = image, uiState = uiState)
+                                    drawCanvasImage(bitmap = bitmap, image = image, uiState = renderUiState)
                                 }
                                 visibleStrokes.forEach { stroke ->
-                                    drawStroke(stroke = stroke, uiState = uiState)
+                                    drawStroke(stroke = stroke, uiState = renderUiState)
                                 }
                                 visibleLaserTrails.forEach { (trail, alpha) ->
-                                    drawLaserTrail(trail = trail, uiState = uiState, alpha = alpha)
+                                    drawLaserTrail(trail = trail, uiState = renderUiState, alpha = alpha)
                                 }
-                                if (uiState.activePoints.isNotEmpty()) {
-                                    drawActiveStroke(uiState)
+                                if (renderUiState.activePoints.isNotEmpty()) {
+                                    drawActiveStroke(renderUiState)
                                 }
                             }
                         } else {
                             // ── WHITEBOARDモード: 既存の無限キャンバス動作 ──
-                            drawBackgroundPattern(uiState)
+                            drawBackgroundPattern(renderUiState)
                             visibleImages.forEach { image ->
                                 val bitmap = imageBitmaps[image.id] ?: return@forEach
-                                drawCanvasImage(bitmap = bitmap, image = image, uiState = uiState)
+                                drawCanvasImage(bitmap = bitmap, image = image, uiState = renderUiState)
                             }
                             visibleStrokes.forEach { stroke ->
-                                drawStroke(stroke = stroke, uiState = uiState)
+                                drawStroke(stroke = stroke, uiState = renderUiState)
                             }
                             visibleLaserTrails.forEach { (trail, alpha) ->
-                                drawLaserTrail(trail = trail, uiState = uiState, alpha = alpha)
+                                drawLaserTrail(trail = trail, uiState = renderUiState, alpha = alpha)
                             }
-                            if (uiState.activePoints.isNotEmpty()) {
-                                drawActiveStroke(uiState)
+                            if (renderUiState.activePoints.isNotEmpty()) {
+                                drawActiveStroke(renderUiState)
                             }
                         }
                     }
@@ -507,7 +524,7 @@ fun CanvasScreen(
                         key("image_overlay_${image.id}") {
                             CanvasImageTransformOverlay(
                                 image = image,
-                                uiState = uiState,
+                                uiState = renderUiState,
                                 isSelected = image.id == selectedImageId,
                                 transformEnabled = uiState.tool == DrawingTool.READONLY,
                                 onSelect = { selectedImageId = image.id },
@@ -521,7 +538,7 @@ fun CanvasScreen(
                         key(stickyNote.id) {
                             StickyNoteItem(
                                 note = stickyNote,
-                                uiState = uiState,
+                                uiState = renderUiState,
                                 palette = uiState.palette,
                                 isSelected = stickyNote.id == selectedStickyNoteId,
                                 isTransformEnabled = stickyNote.id == transformStickyNoteId,
@@ -555,7 +572,6 @@ fun CanvasScreen(
                             )
                         }
                     }
-                }
             }
         }
 
@@ -756,6 +772,8 @@ private fun StickyNoteItem(
     val density = LocalDensity.current
     val noteWidthDp = with(density) { ((note.width * uiState.scale) + resizeScreenDeltaX).coerceAtLeast(120f).toDp() }
     val noteHeightDp = with(density) { ((note.height * uiState.scale) + resizeScreenDeltaY).coerceAtLeast(88f).toDp() }
+    val noteShortEdgeDp = min(noteWidthDp.value, noteHeightDp.value)
+    val canShowToolButtons = noteShortEdgeDp >= STICKY_NOTE_TOOL_BUTTON_MIN_SHORT_EDGE_DP
     val screenPos = toScreenPoint(Offset(note.x, note.y), uiState)
     val focusRequester = remember { FocusRequester() }
     val canEditText = isSelected && !isTransformEnabled
@@ -835,59 +853,61 @@ private fun StickyNoteItem(
                             .fillMaxSize()
                             .padding(horizontal = 10.dp, vertical = 10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            StickyNoteHeaderButton(
-                                active = isTransformEnabled,
-                                onClick = {
-                                    onSelect()
-                                    onToggleTransform()
-                                }
+                        if (canShowToolButtons) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.OpenWith,
-                                    contentDescription = "移動とサイズ変更",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = if (isTransformEnabled) {
-                                        MaterialTheme.colorScheme.onPrimary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                StickyNoteHeaderButton(
+                                    active = isTransformEnabled,
+                                    onClick = {
+                                        onSelect()
+                                        onToggleTransform()
                                     }
-                                )
-                            }
-                            StickyNoteHeaderButton(
-                                active = isStyleEditorVisible,
-                                onClick = {
-                                    onSelect()
-                                    onToggleStyleEditor()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.OpenWith,
+                                        contentDescription = "移動とサイズ変更",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (isTransformEnabled) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
                                 }
-                            ) {
-                                Text(
-                                    text = "Aa",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (isStyleEditorVisible) {
-                                        MaterialTheme.colorScheme.onPrimary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                StickyNoteHeaderButton(
+                                    active = isStyleEditorVisible,
+                                    onClick = {
+                                        onSelect()
+                                        onToggleStyleEditor()
                                     }
-                                )
-                            }
-                            // スペーサー
-                            androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
-                            // 削除ボタン
-                            StickyNoteHeaderButton(
-                                active = false,
-                                onClick = onDelete
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Close,
-                                    contentDescription = "削除",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.error
-                                )
+                                ) {
+                                    Text(
+                                        text = "Aa",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isStyleEditorVisible) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                                // スペーサー
+                                androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+                                // 削除ボタン
+                                StickyNoteHeaderButton(
+                                    active = false,
+                                    onClick = onDelete
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Close,
+                                        contentDescription = "削除",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                         }
 
@@ -895,7 +915,7 @@ private fun StickyNoteItem(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
-                                .padding(top = 10.dp)
+                                .padding(top = if (canShowToolButtons) 10.dp else 0.dp)
                         ) {
                             if (canEditText) {
                                 val scrollState = rememberScrollState()
@@ -979,7 +999,7 @@ private fun StickyNoteItem(
                 }
             }
 
-            if (isStyleEditorVisible) {
+            if (isStyleEditorVisible && canShowToolButtons) {
                 StickyNoteStyleEditor(
                     note = note,
                     palette = palette,
@@ -1061,6 +1081,7 @@ private fun StickyNoteStyleEditor(
 
 private const val LASER_TRAIL_KEEP_MS = 2_000L
 private const val STICKY_NOTE_TEXT_BASE_SCALE = 0.6f
+private const val STICKY_NOTE_TOOL_BUTTON_MIN_SHORT_EDGE_DP = 160f
 
 private fun loadImageBitmap(localPath: String): ImageBitmap? {
     val source = File(localPath)

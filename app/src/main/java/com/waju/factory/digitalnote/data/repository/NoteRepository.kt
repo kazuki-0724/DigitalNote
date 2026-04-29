@@ -33,6 +33,7 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlin.math.max
 
 class NoteRepository(
     private val noteDao: NoteDao,
@@ -221,6 +222,11 @@ class NoteRepository(
         height: Float
     ): CanvasImage? {
         val imageFile = copyAndCompressImage(context = context, sourceUri = sourceUri) ?: return null
+        val resolvedSize = resolveInitialCanvasImageSize(
+            imagePath = imageFile.absolutePath,
+            fallbackWidth = width,
+            fallbackHeight = height
+        )
         val current = getCanvasImages(noteId)
         val nextId = (current.maxOfOrNull { it.id } ?: 0L) + 1L
         val image = CanvasImage(
@@ -229,8 +235,8 @@ class NoteRepository(
             localPath = imageFile.absolutePath,
             x = x,
             y = y,
-            width = width,
-            height = height,
+            width = resolvedSize.width,
+            height = resolvedSize.height,
             rotationDeg = 0f,
             cropRect = CropRect(0f, 0f, 1f, 1f)
         )
@@ -249,6 +255,41 @@ class NoteRepository(
     }
 
 }
+
+private fun resolveInitialCanvasImageSize(
+    imagePath: String,
+    fallbackWidth: Float,
+    fallbackHeight: Float
+): CanvasImageSize {
+    val safeFallbackWidth = fallbackWidth.coerceAtLeast(1f)
+    val safeFallbackHeight = fallbackHeight.coerceAtLeast(1f)
+    val options = BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+    }
+    BitmapFactory.decodeFile(imagePath, options)
+    val sourceWidth = options.outWidth
+    val sourceHeight = options.outHeight
+    if (sourceWidth <= 0 || sourceHeight <= 0) {
+        return CanvasImageSize(safeFallbackWidth, safeFallbackHeight)
+    }
+
+    val aspectRatio = sourceWidth.toFloat() / sourceHeight.toFloat()
+    val longEdge = max(safeFallbackWidth, safeFallbackHeight)
+
+    return if (aspectRatio >= 1f) {
+        CanvasImageSize(
+            width = longEdge,
+            height = longEdge / aspectRatio
+        )
+    } else {
+        CanvasImageSize(
+            width = longEdge * aspectRatio,
+            height = longEdge
+        )
+    }
+}
+
+private data class CanvasImageSize(val width: Float, val height: Float)
 
 private fun copyAndCompressImage(context: Context, sourceUri: Uri): File? {
     val bitmap = context.contentResolver.openInputStream(sourceUri)?.use { BitmapFactory.decodeStream(it) } ?: return null

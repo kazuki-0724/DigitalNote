@@ -31,7 +31,7 @@ fun HomeTopBar() {
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = { }) {
@@ -54,7 +54,7 @@ fun HomeTopBar() {
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .padding(horizontal = 9.dp, vertical = 7.dp)
         ) {
             Text("JP", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
         }
@@ -71,7 +71,7 @@ fun SectionTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 6.dp, vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBackToTop != null) {
@@ -87,7 +87,9 @@ fun SectionTopBar(
             text = title,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 0.dp)
         )
         if (onOpenSettings != null) {
             IconButton(onClick = onOpenSettings) {
@@ -97,7 +99,7 @@ fun SectionTopBar(
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
                 Text(
                     text = "👤",
-                    modifier = Modifier.padding(10.dp),
+                    modifier = Modifier.padding(9.dp),
                     fontSize = 18.sp
                 )
             }

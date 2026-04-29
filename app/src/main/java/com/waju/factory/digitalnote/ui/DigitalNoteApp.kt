@@ -19,7 +19,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -154,8 +153,7 @@ fun DigitalNoteApp() {
                     uiState = canvasState,
                     settingsOpenRequestKey = canvasSettingsOpenRequestKey,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .fillMaxSize(),
                     onToolChanged = canvasViewModel::onToolChanged,
                     onModeChanged = canvasViewModel::onModeChanged,
                     onBackgroundStyleChanged = canvasViewModel::onBackgroundStyleChanged,

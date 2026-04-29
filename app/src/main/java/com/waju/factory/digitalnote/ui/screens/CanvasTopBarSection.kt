@@ -60,14 +60,16 @@ internal fun CanvasTopBarSection(
     onNextPage: () -> Unit = {}
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             ToolbarToggleButton(
@@ -159,8 +161,8 @@ internal fun CanvasTopBarSection(
 
         Box(
             modifier = Modifier
-                .padding(horizontal = 4.dp, vertical = 4.dp)
-                .size(width = 52.dp, height = 40.dp)
+                .padding(horizontal = 4.dp, vertical = 3.dp)
+                .size(width = 47.dp, height = 36.dp)
                 .background(
                     color = if (sidebarOpen) {
                         MaterialTheme.colorScheme.primaryContainer
@@ -180,7 +182,7 @@ internal fun CanvasTopBarSection(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(23.dp)
             )
         }
     }
@@ -204,7 +206,7 @@ private fun ToolbarToggleButton(
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
