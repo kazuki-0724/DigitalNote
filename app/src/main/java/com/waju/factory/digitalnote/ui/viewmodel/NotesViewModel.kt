@@ -24,6 +24,10 @@ class NotesViewModel(
         return repository.createNote(title, coverColor)
     }
 
+    suspend fun createChatNote(title: String, coverColor: Color): Int {
+        return repository.createChatNote(title, coverColor)
+    }
+
     fun updateNoteAppearance(noteId: Int, title: String, coverColor: Color) {
         viewModelScope.launch {
             repository.updateNoteAppearance(noteId = noteId, title = title, coverColor = coverColor)

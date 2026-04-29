@@ -27,6 +27,7 @@ data class NoteEntity(
     val currentPageIndex: Int,
     val canvasScale: Float,
     val canvasOffsetX: Float,
-    val canvasOffsetY: Float
+    val canvasOffsetY: Float,
+    val noteType: String = "CANVAS"
 )
 

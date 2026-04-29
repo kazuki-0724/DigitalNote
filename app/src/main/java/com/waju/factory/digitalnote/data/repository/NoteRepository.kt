@@ -9,14 +9,17 @@ import androidx.compose.ui.graphics.Color
 import com.waju.factory.digitalnote.data.local.dao.CanvasImageDao
 import com.waju.factory.digitalnote.data.local.dao.NoteImageCountRow
 import com.waju.factory.digitalnote.data.local.dao.CanvasTextBoxDao
+import com.waju.factory.digitalnote.data.local.dao.ChatMessageDao
 import com.waju.factory.digitalnote.data.local.dao.NoteDao
 import com.waju.factory.digitalnote.data.local.dao.StrokeDao
 import com.waju.factory.digitalnote.data.local.entity.CanvasImageEntity
 import com.waju.factory.digitalnote.data.local.entity.CanvasTextBoxEntity
+import com.waju.factory.digitalnote.data.local.entity.ChatMessageEntity
 import com.waju.factory.digitalnote.data.local.entity.NoteEntity
 import com.waju.factory.digitalnote.data.local.entity.StrokeEntity
 import com.waju.factory.digitalnote.ui.canvas.CanvasImage
 import com.waju.factory.digitalnote.model.NoteItem
+import com.waju.factory.digitalnote.model.NoteType
 import com.waju.factory.digitalnote.ui.canvas.CanvasBackgroundStyle
 import com.waju.factory.digitalnote.ui.canvas.CanvasInputMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasMode
@@ -39,7 +42,8 @@ class NoteRepository(
     private val noteDao: NoteDao,
     private val strokeDao: StrokeDao,
     private val textBoxDao: CanvasTextBoxDao,
-    private val imageDao: CanvasImageDao
+    private val imageDao: CanvasImageDao,
+    private val chatMessageDao: ChatMessageDao
 ) {
     suspend fun createNote(title: String, coverColor: Color = NoteCoverColors.first()): Int {
         val newId = (noteDao.maxId() ?: 0) + 1
@@ -67,7 +71,41 @@ class NoteRepository(
             currentPageIndex = defaultSettings.currentPageIndex,
             canvasScale = defaultSettings.scale,
             canvasOffsetX = defaultSettings.offsetX,
-            canvasOffsetY = defaultSettings.offsetY
+            canvasOffsetY = defaultSettings.offsetY,
+            noteType = "CANVAS"
+        )
+        noteDao.insert(note)
+        return newId
+    }
+
+    suspend fun createChatNote(title: String, coverColor: Color = NoteCoverColors.first()): Int {
+        val newId = (noteDao.maxId() ?: 0) + 1
+        val defaultSettings = CanvasSettings()
+        val note = NoteEntity(
+            id = newId,
+            title = title,
+            excerpt = "チャット形式のノート",
+            content = "",
+            updatedLabel = "今",
+            tagsCsv = "CHAT",
+            tonesCsv = deriveTones(defaultSettings.palette).joinToString(",") { it.value.toLong().toString() },
+            coverColorArgb = coverColor.value.toLong(),
+            handwritten = false,
+            starred = false,
+            hasAttachment = false,
+            paletteCsv = encodeColors(defaultSettings.palette),
+            selectedColorIndex = defaultSettings.selectedColorIndex,
+            baseStrokeWidth = defaultSettings.baseStrokeWidth,
+            sensitivity = defaultSettings.sensitivity,
+            canvasMode = defaultSettings.mode.name,
+            backgroundStyle = defaultSettings.backgroundStyle.name,
+            inputMode = defaultSettings.inputMode.name,
+            pageCount = defaultSettings.totalPages,
+            currentPageIndex = defaultSettings.currentPageIndex,
+            canvasScale = defaultSettings.scale,
+            canvasOffsetX = defaultSettings.offsetX,
+            canvasOffsetY = defaultSettings.offsetY,
+            noteType = "CHAT"
         )
         noteDao.insert(note)
         return newId
@@ -135,6 +173,41 @@ class NoteRepository(
 
     suspend fun deleteNote(noteId: Int) {
         noteDao.deleteById(noteId)
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
+
+    fun observeChatMessages(noteId: Int): Flow<List<ChatMessageEntity>> =
+        chatMessageDao.observeByNoteId(noteId)
+
+    suspend fun sendChatMessage(
+        noteId: Int,
+        type: String,
+        content: String,
+        localImagePath: String = "",
+        replyToMessageId: Long? = null
+    ): Long {
+        val entity = ChatMessageEntity(
+            noteId = noteId,
+            type = type,
+            content = content,
+            localImagePath = localImagePath,
+            timestamp = System.currentTimeMillis(),
+            replyToMessageId = replyToMessageId
+        )
+        return chatMessageDao.insert(entity)
+    }
+
+    suspend fun deleteChatMessage(id: Long) {
+        chatMessageDao.deleteById(id)
+    }
+
+    suspend fun updateChatMessage(id: Long, content: String, type: String) {
+        chatMessageDao.updateMessage(id = id, content = content, type = type)
+    }
+
+    suspend fun importImageForChat(context: Context, sourceUri: Uri): String? {
+        return copyAndCompressImageToChat(context = context, sourceUri = sourceUri)?.absolutePath
     }
 
     suspend fun saveCanvasSettings(noteId: Int, settings: CanvasSettings) {
@@ -312,6 +385,27 @@ private fun copyAndCompressImage(context: Context, sourceUri: Uri): File? {
     }.getOrNull()
 }
 
+private fun copyAndCompressImageToChat(context: Context, sourceUri: Uri): File? {
+    val bitmap = context.contentResolver.openInputStream(sourceUri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+    val imagesDir = File(context.filesDir, "chat_images")
+    if (!imagesDir.exists()) {
+        imagesDir.mkdirs()
+    }
+    val targetFile = File(imagesDir, "chat_img_${System.currentTimeMillis()}.webp")
+    val compressFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Bitmap.CompressFormat.WEBP_LOSSY
+    } else {
+        @Suppress("DEPRECATION")
+        Bitmap.CompressFormat.WEBP
+    }
+    return runCatching {
+        FileOutputStream(targetFile).use { output ->
+            bitmap.compress(compressFormat, 85, output)
+        }
+        targetFile
+    }.getOrNull()
+}
+
 private fun deleteFileSilently(path: String) {
     runCatching {
         val file = File(path)
@@ -372,7 +466,8 @@ private fun NoteEntity.toModel(searchableText: String = "", hasAttachmentOverrid
         searchableText = searchableText,
         handwritten = handwritten,
         starred = starred,
-        hasAttachment = hasAttachmentOverride ?: hasAttachment
+        hasAttachment = hasAttachmentOverride ?: hasAttachment,
+        noteType = runCatching { NoteType.valueOf(noteType) }.getOrDefault(NoteType.CANVAS)
     )
 }
 
@@ -422,7 +517,8 @@ private fun NoteItem.toEntity(): NoteEntity {
         currentPageIndex = defaultSettings.currentPageIndex,
         canvasScale = defaultSettings.scale,
         canvasOffsetX = defaultSettings.offsetX,
-        canvasOffsetY = defaultSettings.offsetY
+        canvasOffsetY = defaultSettings.offsetY,
+        noteType = noteType.name
     )
 }
 
@@ -502,5 +598,4 @@ private fun CanvasImage.toEntity(noteId: Int): CanvasImageEntity {
         cropBottom = cropRect.bottom
     )
 }
-
 

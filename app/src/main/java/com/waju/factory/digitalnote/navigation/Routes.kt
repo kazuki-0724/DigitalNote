@@ -24,6 +24,11 @@ sealed interface AppRoute {
         override val route: String = "editor/{noteId}"
         fun create(noteId: Int): String = "editor/$noteId"
     }
+
+    data object Chat : AppRoute {
+        override val route: String = "chat/{noteId}"
+        fun create(noteId: Int): String = "chat/$noteId"
+    }
 }
 
 data class BottomDestination(

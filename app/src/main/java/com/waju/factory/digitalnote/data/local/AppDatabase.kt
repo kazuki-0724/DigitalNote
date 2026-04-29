@@ -7,10 +7,12 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.waju.factory.digitalnote.data.local.dao.CanvasTextBoxDao
 import com.waju.factory.digitalnote.data.local.dao.CanvasImageDao
+import com.waju.factory.digitalnote.data.local.dao.ChatMessageDao
 import com.waju.factory.digitalnote.data.local.dao.NoteDao
 import com.waju.factory.digitalnote.data.local.dao.StrokeDao
 import com.waju.factory.digitalnote.data.local.entity.CanvasImageEntity
 import com.waju.factory.digitalnote.data.local.entity.CanvasTextBoxEntity
+import com.waju.factory.digitalnote.data.local.entity.ChatMessageEntity
 import com.waju.factory.digitalnote.data.local.entity.NoteEntity
 import com.waju.factory.digitalnote.data.local.entity.StrokeEntity
 import com.waju.factory.digitalnote.ui.canvas.CanvasBackgroundStyle
@@ -21,8 +23,8 @@ import com.waju.factory.digitalnote.ui.canvas.LegacyDefaultCanvasPalette
 import com.waju.factory.digitalnote.ui.theme.NoteCoverColors
 
 @Database(
-    entities = [NoteEntity::class, StrokeEntity::class, CanvasTextBoxEntity::class, CanvasImageEntity::class],
-    version = 9,
+    entities = [NoteEntity::class, StrokeEntity::class, CanvasTextBoxEntity::class, CanvasImageEntity::class, ChatMessageEntity::class],
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun strokeDao(): StrokeDao
     abstract fun textBoxDao(): CanvasTextBoxDao
     abstract fun imageDao(): CanvasImageDao
+    abstract fun chatMessageDao(): ChatMessageDao
 
     companion object {
         private val defaultPaletteCsv = DefaultCanvasPalette.joinToString(",") { it.value.toLong().toString() }
@@ -152,4 +155,3 @@ abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
-

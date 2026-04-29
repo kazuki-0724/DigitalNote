@@ -42,3 +42,16 @@ class EditorViewModelFactory(
     }
 }
 
+class ChatViewModelFactory(
+    private val repository: NoteRepository,
+    private val noteId: Int
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ChatViewModel(repository, noteId) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+    }
+}
+

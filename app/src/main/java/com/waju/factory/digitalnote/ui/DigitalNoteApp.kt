@@ -29,15 +29,20 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.waju.factory.digitalnote.data.local.AppDatabase
 import com.waju.factory.digitalnote.data.repository.NoteRepository
+import com.waju.factory.digitalnote.model.NoteType
 import com.waju.factory.digitalnote.navigation.AppRoute
 import com.waju.factory.digitalnote.ui.components.HomeTopBar
+import com.waju.factory.digitalnote.ui.components.NoteTypePickerDialog
 import com.waju.factory.digitalnote.ui.components.NoteUpsertDialog
 import com.waju.factory.digitalnote.ui.components.SectionTopBar
 import com.waju.factory.digitalnote.ui.screens.CanvasScreen
+import com.waju.factory.digitalnote.ui.screens.ChatScreen
 import com.waju.factory.digitalnote.ui.screens.EditorScreen
 import com.waju.factory.digitalnote.ui.screens.NotesScreen
 import com.waju.factory.digitalnote.ui.viewmodel.CanvasViewModel
 import com.waju.factory.digitalnote.ui.viewmodel.CanvasViewModelFactory
+import com.waju.factory.digitalnote.ui.viewmodel.ChatViewModel
+import com.waju.factory.digitalnote.ui.viewmodel.ChatViewModelFactory
 import com.waju.factory.digitalnote.ui.viewmodel.EditorViewModel
 import com.waju.factory.digitalnote.ui.viewmodel.EditorViewModelFactory
 import com.waju.factory.digitalnote.ui.viewmodel.NotesViewModel
@@ -50,7 +55,13 @@ fun DigitalNoteApp() {
     val context = LocalContext.current
     val repository = remember {
         val database = AppDatabase.getInstance(context)
-        NoteRepository(database.noteDao(), database.strokeDao(), database.textBoxDao(), database.imageDao())
+        NoteRepository(
+            database.noteDao(),
+            database.strokeDao(),
+            database.textBoxDao(),
+            database.imageDao(),
+            database.chatMessageDao()
+        )
     }
 
     val notesViewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(repository))
@@ -62,12 +73,11 @@ fun DigitalNoteApp() {
     val currentRoute = backStackEntry?.destination?.route.orEmpty()
     val isCanvasRoute = currentRoute.startsWith("canvas")
     val isEditorRoute = currentRoute.startsWith("editor")
+    val isChatRoute = currentRoute.startsWith("chat")
     val currentCanvasNoteId = backStackEntry?.arguments?.getInt("noteId")
     val currentCanvasNoteTitle = notes.firstOrNull { it.id == currentCanvasNoteId }?.title
 
-    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
-    var newNoteTitle by rememberSaveable { mutableStateOf("") }
-    var newNoteCoverColorIndex by rememberSaveable { mutableStateOf(0) }
+    var showNoteTypePickerDialog by rememberSaveable { mutableStateOf(false) }
     var showEditDialog by rememberSaveable { mutableStateOf(false) }
     var editingNoteId by rememberSaveable { mutableStateOf<Int?>(null) }
     var editingNoteTitle by rememberSaveable { mutableStateOf("") }
@@ -92,15 +102,22 @@ fun DigitalNoteApp() {
                         canvasSettingsOpenRequestKey += 1
                     }
                 )
+                isChatRoute -> SectionTopBar(
+                    title = currentCanvasNoteTitle?.ifBlank { "チャット" } ?: "チャット",
+                    onBackToTop = {
+                        navController.navigate(AppRoute.Notes.route) {
+                            popUpTo(AppRoute.Notes.route) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
+                )
                 else -> HomeTopBar()
             }
         },
         floatingActionButton = {
             if (currentRoute.startsWith(AppRoute.Notes.route)) {
                 FloatingActionButton(onClick = {
-                    newNoteTitle = ""
-                    newNoteCoverColorIndex = 0
-                    showCreateDialog = true
+                    showNoteTypePickerDialog = true
                 }) {
                     Icon(Icons.Outlined.Add, contentDescription = "新規ノート")
                 }
@@ -119,7 +136,11 @@ fun DigitalNoteApp() {
                     notes = notes,
                     modifier = Modifier.fillMaxSize(),
                     onOpenNote = { note ->
-                        navController.navigate(AppRoute.Canvas.create(note.id))
+                        when (note.noteType) {
+                            NoteType.CHAT -> navController.navigate(AppRoute.Chat.create(note.id))
+                            NoteType.EDITOR -> navController.navigate(AppRoute.Editor.create(note.id))
+                            else -> navController.navigate(AppRoute.Canvas.create(note.id))
+                        }
                     },
                     onLongPressNote = { note ->
                         editingNoteId = note.id
@@ -152,8 +173,7 @@ fun DigitalNoteApp() {
                 CanvasScreen(
                     uiState = canvasState,
                     settingsOpenRequestKey = canvasSettingsOpenRequestKey,
-                    modifier = Modifier
-                        .fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     onToolChanged = canvasViewModel::onToolChanged,
                     onModeChanged = canvasViewModel::onModeChanged,
                     onBackgroundStyleChanged = canvasViewModel::onBackgroundStyleChanged,
@@ -218,34 +238,55 @@ fun DigitalNoteApp() {
                     onClose = { navController.popBackStack() }
                 )
             }
+
+            composable(
+                route = AppRoute.Chat.route,
+                arguments = listOf(navArgument("noteId") { type = NavType.IntType })
+            ) { entry ->
+                val noteId = entry.arguments?.getInt("noteId") ?: 1
+                val chatViewModel: ChatViewModel = viewModel(
+                    key = "chat_$noteId",
+                    factory = ChatViewModelFactory(repository, noteId)
+                )
+                val chatState by chatViewModel.uiState.collectAsStateWithLifecycle()
+
+                ChatScreen(
+                    uiState = chatState,
+                    onInputTextChanged = chatViewModel::onInputTextChanged,
+                    onInputTypeChanged = chatViewModel::onInputTypeChanged,
+                    onSendText = chatViewModel::sendTextMessage,
+                    onSendImage = { uri -> chatViewModel.sendImageMessage(context, uri) },
+                    onDeleteMessage = chatViewModel::deleteMessage,
+                    onEditMessage = chatViewModel::startEdit,
+                    onReplyMessage = chatViewModel::startReply,
+                    onCancelComposeMode = chatViewModel::cancelComposeMode,
+                    onSendThreadReply = chatViewModel::sendThreadReply
+                )
+            }
         }
 
-        if (showCreateDialog) {
-            NoteUpsertDialog(
-                title = "ノートを作成",
-                noteTitle = newNoteTitle,
-                selectedCoverColorIndex = newNoteCoverColorIndex,
-                onTitleChange = { newNoteTitle = it },
-                onCoverColorChange = { newNoteCoverColorIndex = it },
-                onDismiss = {
-                    showCreateDialog = false
-                    newNoteTitle = ""
-                    newNoteCoverColorIndex = 0
-                },
-                onConfirm = { title, coverColor ->
-                    val safeTitle = title.trim().ifBlank { "新しいノート" }
+        // ── ノート新規作成ダイアログ ──────────────────────────────────────────
+        if (showNoteTypePickerDialog) {
+            NoteTypePickerDialog(
+                onDismiss = { showNoteTypePickerDialog = false },
+                onConfirm = { title, coverColor, noteType ->
                     scope.launch {
-                        val newId = notesViewModel.createNote(safeTitle, coverColor)
-                        showCreateDialog = false
-                        newNoteTitle = ""
-                        newNoteCoverColorIndex = 0
-                        navController.navigate(AppRoute.Canvas.create(newId))
+                        val newId = when (noteType) {
+                            NoteType.CHAT -> notesViewModel.createChatNote(title, coverColor)
+                            else -> notesViewModel.createNote(title, coverColor)
+                        }
+                        showNoteTypePickerDialog = false
+                        when (noteType) {
+                            NoteType.CHAT -> navController.navigate(AppRoute.Chat.create(newId))
+                            NoteType.EDITOR -> navController.navigate(AppRoute.Editor.create(newId))
+                            else -> navController.navigate(AppRoute.Canvas.create(newId))
+                        }
                     }
-                },
-                confirmText = "作成"
+                }
             )
         }
 
+        // ── ノート編集ダイアログ ──────────────────────────────────────────────
         if (showEditDialog && editingNoteId != null) {
             NoteUpsertDialog(
                 title = "ノートを編集",

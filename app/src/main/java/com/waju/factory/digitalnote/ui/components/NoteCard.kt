@@ -11,10 +11,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.waju.factory.digitalnote.model.NoteItem
+import com.waju.factory.digitalnote.model.NoteType
 import com.waju.factory.digitalnote.ui.theme.TextSecondary
 import com.waju.factory.digitalnote.ui.theme.contentColorForCover
 
@@ -67,6 +73,24 @@ fun NoteCard(
                         color = coverTextColor.copy(alpha = 0.82f),
                         fontSize = 12.sp
                     )
+                }
+                // Chat badge
+                if (note.noteType == NoteType.CHAT) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(coverTextColor.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Chat,
+                            contentDescription = "チャットノート",
+                            tint = coverTextColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 

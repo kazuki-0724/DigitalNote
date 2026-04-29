@@ -14,6 +14,9 @@ data class NoteItem(
     val searchableText: String = "",
     val handwritten: Boolean = false,
     val starred: Boolean = false,
-    val hasAttachment: Boolean = false
+    val hasAttachment: Boolean = false,
+    val noteType: NoteType = NoteType.CANVAS
 )
+
+
 
