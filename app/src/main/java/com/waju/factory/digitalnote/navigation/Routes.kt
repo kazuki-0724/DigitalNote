@@ -29,6 +29,11 @@ sealed interface AppRoute {
         override val route: String = "chat/{noteId}"
         fun create(noteId: Int): String = "chat/$noteId"
     }
+
+    data object ChatAttachmentViewer : AppRoute {
+        override val route: String = "chat_attachment_viewer/{noteId}/{messageId}"
+        fun create(noteId: Int, messageId: Long): String = "chat_attachment_viewer/$noteId/$messageId"
+    }
 }
 
 data class BottomDestination(

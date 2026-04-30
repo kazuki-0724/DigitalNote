@@ -1,9 +1,15 @@
 package com.waju.factory.digitalnote.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -67,8 +73,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
@@ -79,10 +87,12 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import com.waju.factory.digitalnote.ui.viewmodel.ChatInputType
 import com.waju.factory.digitalnote.ui.viewmodel.ChatMessage
 import com.waju.factory.digitalnote.ui.viewmodel.ChatUiState
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import java.io.File
 
 @Composable
 fun ChatScreen(
@@ -95,15 +105,25 @@ fun ChatScreen(
     onEditMessage: (ChatMessage) -> Unit,
     onReplyMessage: (ChatMessage) -> Unit,
     onCancelComposeMode: () -> Unit,
-    onSendThreadReply: (parentId: Long, text: String) -> Unit
+    onSendThreadReply: (parentId: Long, type: ChatInputType, text: String) -> Unit,
+    onSendThreadReplyImage: (parentId: Long, uri: Uri) -> Unit,
+    onOpenViewer: (messageId: Long) -> Unit
 ) {
     val listState = rememberLazyListState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
 
     // スレッドパネル用状態
     var threadParentId by remember { mutableStateOf<Long?>(null) }
+    // スレッド内ビュワー（full-screen オーバーレイ）用状態
+    var threadViewingMessageId by remember { mutableStateOf<Long?>(null) }
+
+    // ビュワー表示中はシステムバックでビュワーを閉じる
+    BackHandler(enabled = threadViewingMessageId != null) {
+        threadViewingMessageId = null
+    }
 
     val topLevelMessages = remember(uiState.messages) {
         uiState.messages.filter { it.replyToMessageId == null }
@@ -154,8 +174,16 @@ fun ChatScreen(
                             clipboardManager.setText(AnnotatedString(text))
                         }
                     },
-                    onReply = onReplyMessage,
-                    onDelete = { message -> onDeleteMessage(message.id) }
+                    // 長押し「返信」は返信件数に関係なく専用スレッドUIを開く
+                    onReply = { threadParentId = parent.id },
+                    onDelete = { message -> onDeleteMessage(message.id) },
+                    onOpenViewer = { message -> onOpenViewer(message.id) },
+                    onCopyImage = { message ->
+                        val copied = copyImageToClipboard(context, message.localImagePath, message.id)
+                        if (copied) {
+                            Toast.makeText(context, "クリップボードにコピーしました", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 )
             }
         }
@@ -273,9 +301,29 @@ fun ChatScreen(
         ThreadDetailSheet(
             parent = parentForThread,
             replies = threadReplies,
-            onSendReply = { text -> onSendThreadReply(parentForThread.id, text) },
+            onSendReply = { type, text -> onSendThreadReply(parentForThread.id, type, text) },
+            onSendReplyImage = { uri -> onSendThreadReplyImage(parentForThread.id, uri) },
+            // スレッド内タップ → 外側 Box にビュワーをオーバーレイ
+            onOpenViewer = { messageId -> threadViewingMessageId = messageId },
             onDismiss = { threadParentId = null }
         )
+    }
+
+    // ── スレッドビュワー全画面オーバーレイ ─────────────────────────────────
+    // ModalBottomSheet の上に重ねる必要があるため、Composable ツリーの末尾へ配置。
+    val viewingMessage = threadViewingMessageId?.let { id ->
+        uiState.messages.firstOrNull { it.id == id }
+    }
+    if (threadViewingMessageId != null) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            ChatAttachmentViewerScreen(
+                message = viewingMessage,
+                onBack = { threadViewingMessageId = null }
+            )
+        }
     }
 }
 
@@ -287,7 +335,9 @@ private fun ThreadMessageBlock(
     onEdit: (ChatMessage) -> Unit,
     onCopy: (ChatMessage) -> Unit,
     onReply: (ChatMessage) -> Unit,
-    onDelete: (ChatMessage) -> Unit
+    onDelete: (ChatMessage) -> Unit,
+    onOpenViewer: (ChatMessage) -> Unit,
+    onCopyImage: (ChatMessage) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         ChatBubble(
@@ -296,7 +346,9 @@ private fun ThreadMessageBlock(
             onEdit = { onEdit(parent) },
             onCopy = { onCopy(parent) },
             onReply = { onReply(parent) },
-            onDelete = { onDelete(parent) }
+            onDelete = { onDelete(parent) },
+            onOpenViewer = { onOpenViewer(parent) },
+            onCopyImage = { onCopyImage(parent) }
         )
 
         if (replyCount > 0) {
@@ -326,7 +378,9 @@ private fun ThreadMessageBlock(
 private fun ThreadDetailSheet(
     parent: ChatMessage,
     replies: List<ChatMessage>,
-    onSendReply: (String) -> Unit,
+    onSendReply: (type: ChatInputType, text: String) -> Unit,
+    onSendReplyImage: (uri: Uri) -> Unit,
+    onOpenViewer: (messageId: Long) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(
@@ -334,12 +388,28 @@ private fun ThreadDetailSheet(
         confirmValueChange = { it != SheetValue.Hidden || true }
     )
     var replyText by remember { mutableStateOf("") }
+    var replyInputType by remember { mutableStateOf(ChatInputType.TEXT) }
     val listState = rememberLazyListState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri -> if (uri != null) onSendReplyImage(uri) }
+
+    val sendAndClose: () -> Unit = {
+        if (replyText.isNotBlank()) {
+            onSendReply(replyInputType, replyText)
+            replyText = ""
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        }
+    }
+
     LaunchedEffect(replies.size) {
-        if (replies.isNotEmpty()) listState.animateScrollToItem(replies.lastIndex)
+        // 親(0) + 区切り(1) + 返信(2..) の並びなので最後尾へスクロール
+        val totalItems = 1 + (if (replies.isNotEmpty()) 1 else 0) + replies.size
+        if (totalItems > 1) listState.animateScrollToItem(totalItems - 1)
     }
 
     ModalBottomSheet(
@@ -349,154 +419,162 @@ private fun ThreadDetailSheet(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // ── ヘッダー ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "閉じる")
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "スレッド",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Divider()
-
-            // ── 親メッセージ ──
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.widthIn(max = 320.dp)
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        Text(
-                            text = parent.content.ifBlank { "📷 画像" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-            }
-
-            // ── 返信数区切り ──
-            if (replies.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Divider(modifier = Modifier.weight(1f))
-                    Text(
-                        text = "${replies.size}件の返信",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Divider(modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "閉じる")
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "スレッド",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
-            }
 
-            // ── 返信一覧 ──
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(replies, key = { it.id }) { reply ->
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                        Surface(
-                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier.widthIn(max = 300.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Divider()
+
+                // ── 親 + 返信数区切り + 返信一覧を同一スクロールビューに同居 ──
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 10.dp)
+                ) {
+                    // 親メッセージ（左寄せ）
+                    item(key = "parent") {
+                        ChatBubble(
+                            message = parent,
+                            isReply = true,
+                            onEdit = {},
+                            onCopy = {},
+                            onReply = {},
+                            onDelete = {},
+                            onOpenViewer = { onOpenViewer(parent.id) },
+                            onCopyImage = {}
+                        )
+                    }
+
+                    // 返信数区切り
+                    if (replies.isNotEmpty()) {
+                        item(key = "divider") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Divider(modifier = Modifier.weight(1f))
                                 Text(
-                                    text = reply.content.ifBlank { "📷 画像" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    text = "${replies.size}件の返信",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                Divider(modifier = Modifier.weight(1f))
                             }
                         }
                     }
-                }
-            }
 
-            Divider()
-
-            // ── 返信入力欄 ──
-            Surface(
-                tonalElevation = 3.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    OutlinedTextField(
-                        value = replyText,
-                        onValueChange = { replyText = it },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp, max = 120.dp),
-                        placeholder = { Text("返信を追加する") },
-                        shape = RoundedCornerShape(20.dp),
-                        maxLines = 4,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Send
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                if (replyText.isNotBlank()) {
-                                    onSendReply(replyText)
-                                    replyText = ""
-                                    focusManager.clearFocus(force = true)
-                                    keyboardController?.hide()
-                                }
-                            }
-                        )
-                    )
-                    IconButton(
-                        onClick = {
-                            if (replyText.isNotBlank()) {
-                                onSendReply(replyText)
-                                replyText = ""
-                                focusManager.clearFocus(force = true)
-                                keyboardController?.hide()
-                            }
-                        },
-                        enabled = replyText.isNotBlank()
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.Send,
-                            contentDescription = "返信を送信",
-                            tint = if (replyText.isNotBlank()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    // 返信一覧
+                    items(replies, key = { it.id }) { reply ->
+                        ChatBubble(
+                            message = reply,
+                            isReply = false,
+                            onEdit = {},
+                            onCopy = {},
+                            onReply = {},
+                            onDelete = {},
+                            onOpenViewer = { onOpenViewer(reply.id) },
+                            onCopyImage = {}
                         )
                     }
+                }
+
+                Divider()
+
+                // ── 返信入力欄（テキスト・MD・HTML・写真 対応） ──
+                Surface(
+                    tonalElevation = 3.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // 入力タイプ切り替えチップ
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = replyInputType == ChatInputType.TEXT,
+                                onClick = { replyInputType = ChatInputType.TEXT },
+                                label = { Text("テキスト", fontSize = 12.sp) }
+                            )
+                            FilterChip(
+                                selected = replyInputType == ChatInputType.MARKDOWN,
+                                onClick = { replyInputType = ChatInputType.MARKDOWN },
+                                label = { Text("MD", fontSize = 12.sp) }
+                            )
+                            FilterChip(
+                                selected = replyInputType == ChatInputType.HTML,
+                                onClick = { replyInputType = ChatInputType.HTML },
+                                label = { Text("HTML", fontSize = 12.sp) }
+                            )
+                        }
+                        // テキスト入力 + 画像ボタン + 送信ボタン
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            IconButton(onClick = { imagePickerLauncher.launch("image/*") }) {
+                                Icon(Icons.Outlined.Image, contentDescription = "画像を添付")
+                            }
+                            OutlinedTextField(
+                                value = replyText,
+                                onValueChange = { replyText = it },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp, max = 120.dp),
+                                placeholder = {
+                                    Text(
+                                        when (replyInputType) {
+                                            ChatInputType.MARKDOWN -> "Markdown を入力..."
+                                            ChatInputType.HTML -> "HTML を入力..."
+                                            else -> "返信を追加する"
+                                        }
+                                    )
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                maxLines = 6,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences,
+                                    imeAction = ImeAction.Send
+                                ),
+                                keyboardActions = KeyboardActions(onSend = { sendAndClose() })
+                            )
+                            IconButton(
+                                onClick = sendAndClose,
+                                enabled = replyText.isNotBlank()
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.Send,
+                                    contentDescription = "返信を送信",
+                                    tint = if (replyText.isNotBlank()) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                )
+                            }
+                        }
                 }
             }
         }
@@ -511,13 +589,18 @@ private fun ChatBubble(
     onEdit: () -> Unit,
     onCopy: () -> Unit,
     onReply: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onOpenViewer: () -> Unit,
+    onCopyImage: () -> Unit
 ) {
     var showActionSheet by remember { mutableStateOf(false) }
+    var showImageActionSheet by remember { mutableStateOf(false) }
     var isRendering by remember(message.id) {
         mutableStateOf(message.type != ChatInputType.TEXT && message.type != ChatInputType.IMAGE)
     }
+    val chatBubbleColor = Color(0xFFE3F2FD)
 
+    // テキスト系メッセージの長押しアクションシート
     if (showActionSheet) {
         ModalBottomSheet(onDismissRequest = { showActionSheet = false }) {
             ActionGrid(
@@ -550,18 +633,86 @@ private fun ChatBubble(
         }
     }
 
+    // 画像専用長押しアクションシート（コピーボタン付き）
+    if (showImageActionSheet) {
+        ModalBottomSheet(onDismissRequest = { showImageActionSheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        icon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                        label = "コピー",
+                        onClick = {
+                            onCopyImage()
+                            showImageActionSheet = false
+                        }
+                    )
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        icon = { Icon(Icons.AutoMirrored.Outlined.Reply, contentDescription = null) },
+                        label = "返信",
+                        onClick = {
+                            onReply()
+                            showImageActionSheet = false
+                        }
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionButton(
+                        modifier = Modifier.weight(1f),
+                        icon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                        label = "削除",
+                        onClick = {
+                            onDelete()
+                            showImageActionSheet = false
+                        }
+                    )
+                    // 同じ幅のダミースペーサー
+                    Box(modifier = Modifier.weight(1f))
+                }
+            }
+            TextButton(
+                onClick = { showImageActionSheet = false },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text("閉じる")
+            }
+            Box(modifier = Modifier.height(12.dp))
+        }
+    }
+
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (isReply) Alignment.CenterStart else Alignment.CenterEnd
     ) {
         Surface(
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-            color = if (isReply) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+            color = chatBubbleColor,
             modifier = Modifier
                 .widthIn(max = 320.dp)
                 .combinedClickable(
-                    onClick = {},
-                    onLongClick = { showActionSheet = true }
+                    onClick = {
+                        when (message.type) {
+                            ChatInputType.MARKDOWN,
+                            ChatInputType.HTML,
+                            ChatInputType.IMAGE -> onOpenViewer()
+                            else -> Unit
+                        }
+                    },
+                    onLongClick = {
+                        if (message.type == ChatInputType.IMAGE) {
+                            showImageActionSheet = true
+                        } else {
+                            showActionSheet = true
+                        }
+                    }
                 )
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -749,5 +900,44 @@ private fun ImageBubbleContent(path: String) {
                 .clip(RoundedCornerShape(10.dp))
                 .heightIn(max = 220.dp)
         )
+    }
+}
+
+private fun copyImageToClipboard(context: Context, imagePath: String, messageId: Long): Boolean {
+    return try {
+        if (imagePath.isBlank()) {
+            Log.e("ChatImageCopy", "Image path is blank. messageId=$messageId")
+            return false
+        }
+
+        val sourceFile = File(imagePath)
+        if (!sourceFile.exists()) {
+            Log.e("ChatImageCopy", "Image file does not exist. messageId=$messageId path=$imagePath")
+            return false
+        }
+
+        val clipDir = File(context.cacheDir, "clipboard_images").apply { mkdirs() }
+        clipDir.listFiles()?.forEach { cached ->
+            if (cached.isFile && System.currentTimeMillis() - cached.lastModified() > 60_000L) {
+                cached.delete()
+            }
+        }
+
+        val extension = sourceFile.extension.takeIf { it.isNotBlank() } ?: "webp"
+        val targetFile = File(clipDir, "chat_copy_${System.currentTimeMillis()}.$extension")
+        sourceFile.copyTo(targetFile, overwrite = true)
+
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            targetFile
+        )
+        val clip = ClipData.newUri(context.contentResolver, "chat_image", uri)
+        val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        manager.setPrimaryClip(clip)
+        true
+    } catch (e: Exception) {
+        Log.e("ChatImageCopy", "Failed to copy image. messageId=$messageId", e)
+        false
     }
 }

@@ -143,14 +143,27 @@ class ChatViewModel(
         }
     }
 
-    fun sendThreadReply(parentId: Long, text: String) {
+    fun sendThreadReply(parentId: Long, type: ChatInputType, text: String) {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return
         viewModelScope.launch {
             repository.sendChatMessage(
                 noteId = noteId,
-                type = ChatInputType.TEXT.name,
+                type = type.name,
                 content = trimmed,
+                replyToMessageId = parentId
+            )
+        }
+    }
+
+    fun sendThreadReplyImage(parentId: Long, context: Context, uri: Uri) {
+        viewModelScope.launch {
+            val path = repository.importImageForChat(context, uri) ?: return@launch
+            repository.sendChatMessage(
+                noteId = noteId,
+                type = ChatInputType.IMAGE.name,
+                content = "",
+                localImagePath = path,
                 replyToMessageId = parentId
             )
         }

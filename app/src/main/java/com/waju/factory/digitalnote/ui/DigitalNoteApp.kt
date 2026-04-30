@@ -36,6 +36,7 @@ import com.waju.factory.digitalnote.ui.components.NoteTypePickerDialog
 import com.waju.factory.digitalnote.ui.components.NoteUpsertDialog
 import com.waju.factory.digitalnote.ui.components.SectionTopBar
 import com.waju.factory.digitalnote.ui.screens.CanvasScreen
+import com.waju.factory.digitalnote.ui.screens.ChatAttachmentViewerScreen
 import com.waju.factory.digitalnote.ui.screens.ChatScreen
 import com.waju.factory.digitalnote.ui.screens.EditorScreen
 import com.waju.factory.digitalnote.ui.screens.NotesScreen
@@ -74,6 +75,7 @@ fun DigitalNoteApp() {
     val isCanvasRoute = currentRoute.startsWith("canvas")
     val isEditorRoute = currentRoute.startsWith("editor")
     val isChatRoute = currentRoute.startsWith("chat")
+    val isChatAttachmentViewerRoute = currentRoute.startsWith("chat_attachment_viewer")
     val currentCanvasNoteId = backStackEntry?.arguments?.getInt("noteId")
     val currentCanvasNoteTitle = notes.firstOrNull { it.id == currentCanvasNoteId }?.title
 
@@ -89,6 +91,7 @@ fun DigitalNoteApp() {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             when {
+                isChatAttachmentViewerRoute -> Unit
                 isEditorRoute -> Unit
                 isCanvasRoute -> SectionTopBar(
                     title = currentCanvasNoteTitle?.ifBlank { "キャンバス" } ?: "キャンバス",
@@ -260,7 +263,52 @@ fun DigitalNoteApp() {
                     onEditMessage = chatViewModel::startEdit,
                     onReplyMessage = chatViewModel::startReply,
                     onCancelComposeMode = chatViewModel::cancelComposeMode,
-                    onSendThreadReply = chatViewModel::sendThreadReply
+                    onSendThreadReply = { parentId, type, text ->
+                        chatViewModel.sendThreadReply(parentId, type, text)
+                    },
+                    onSendThreadReplyImage = { parentId, uri ->
+                        chatViewModel.sendThreadReplyImage(parentId, context, uri)
+                    },
+                    onOpenViewer = { messageId ->
+                        navController.navigate(AppRoute.ChatAttachmentViewer.create(noteId, messageId))
+                    }
+                )
+            }
+
+            composable(
+                route = AppRoute.ChatAttachmentViewer.route,
+                arguments = listOf(
+                    navArgument("noteId") { type = NavType.IntType },
+                    navArgument("messageId") { type = NavType.LongType }
+                )
+            ) { entry ->
+                val noteId = entry.arguments?.getInt("noteId") ?: 1
+                val messageId = entry.arguments?.getLong("messageId") ?: 0L
+
+                // チャット画面の BackStackEntry に紐づく ViewModel を再利用し、
+                // 既に読み込み済みのメッセージ一覧をそのまま参照する。
+                val parentChatEntry = remember(noteId) {
+                    runCatching {
+                        navController.getBackStackEntry(AppRoute.Chat.route)
+                    }.getOrNull()
+                }
+                val chatViewModel: ChatViewModel = if (parentChatEntry != null) {
+                    viewModel(
+                        viewModelStoreOwner = parentChatEntry,
+                        factory = ChatViewModelFactory(repository, noteId)
+                    )
+                } else {
+                    viewModel(
+                        key = "chat_$noteId",
+                        factory = ChatViewModelFactory(repository, noteId)
+                    )
+                }
+                val chatState by chatViewModel.uiState.collectAsStateWithLifecycle()
+                val message = chatState.messages.firstOrNull { it.id == messageId }
+
+                ChatAttachmentViewerScreen(
+                    message = message,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }

@@ -65,7 +65,8 @@ fun HomeTopBar() {
 fun SectionTopBar(
     title: String,
     onBackToTop: (() -> Unit)? = null,
-    onOpenSettings: (() -> Unit)? = null
+    onOpenSettings: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -91,17 +92,21 @@ fun SectionTopBar(
                 .weight(1f)
                 .padding(vertical = 0.dp)
         )
-        if (onOpenSettings != null) {
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Outlined.Tune, contentDescription = "キャンバス設定")
+        when {
+            trailingContent != null -> trailingContent()
+            onOpenSettings != null -> {
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Tune, contentDescription = "キャンバス設定")
+                }
             }
-        } else {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
-                Text(
-                    text = "👤",
-                    modifier = Modifier.padding(9.dp),
-                    fontSize = 18.sp
-                )
+            else -> {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface) {
+                    Text(
+                        text = "👤",
+                        modifier = Modifier.padding(9.dp),
+                        fontSize = 18.sp
+                    )
+                }
             }
         }
     }
