@@ -40,6 +40,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import compose.icons.FontAwesomeIcons
+import compose.icons.fontawesomeicons.Solid
+import compose.icons.fontawesomeicons.solid.Eraser
+import com.waju.factory.digitalnote.ui.canvas.CanvasMode
 import com.waju.factory.digitalnote.ui.canvas.CanvasUiState
 import com.waju.factory.digitalnote.ui.canvas.DrawingTool
 
@@ -74,25 +78,22 @@ internal fun CanvasTopBarSection(
         ) {
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.PEN,
-//                label = "ペン",
                 icon = Icons.Outlined.Draw,
                 onClick = { onToolChanged(DrawingTool.PEN) }
             )
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.ERASER,
-//                label = "消しゴム",
-                icon = Icons.Outlined.AutoFixHigh,
-                onClick = { onToolChanged(DrawingTool.ERASER) }
+                icon = FontAwesomeIcons.Solid.Eraser,
+                onClick = { onToolChanged(DrawingTool.ERASER) },
+                iconModifier = Modifier.padding(3.dp),
             )
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.MARKER,
-//                label = "マーカー",
                 icon = Icons.Outlined.BorderColor,
                 onClick = { onToolChanged(DrawingTool.MARKER) }
             )
             ToolbarToggleButton(
                 selected = uiState.tool == DrawingTool.TEXT,
-//                label = "付箋",
                 icon = Icons.Outlined.TextFields,
                 onClick = { onToolChanged(DrawingTool.TEXT) }
             )
@@ -138,7 +139,7 @@ internal fun CanvasTopBarSection(
                 Icon(Icons.Outlined.Image, contentDescription = "画像を挿入")
             }
             // ページ送りボタン: PAGEモードかつ2ページ以上のときのみ表示
-            if (uiState.mode == com.waju.factory.digitalnote.ui.canvas.CanvasMode.PAGE && uiState.totalPages >= 2) {
+            if (uiState.mode == CanvasMode.PAGE && uiState.totalPages >= 2) {
                 IconButton(
                     onClick = onPrevPage,
                     enabled = uiState.currentPageIndex > 0
@@ -191,8 +192,8 @@ internal fun CanvasTopBarSection(
 @Composable
 private fun ToolbarToggleButton(
     selected: Boolean,
-    // label: String,
     icon: ImageVector,
+    iconModifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Surface(
@@ -213,13 +214,11 @@ private fun ToolbarToggleButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(24.dp) // Materialの標準サイズを明示
+                    .then(iconModifier) // 追加: 個別のModifierを結合
             )
-//            Text(
-//                text = label,
-//                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-//                style = MaterialTheme.typography.labelLarge
-//            )
         }
     }
 }

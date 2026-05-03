@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.compose.foundation.layout)
     ksp(libs.androidx.room.compiler)
     implementation(libs.compose.markdown)
     // compose-markdown のトランジティブ依存 (atlassian fork 0.13.0) を直接利用するため明示宣言
@@ -69,4 +70,5 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
     implementation("com.google.firebase:firebase-analytics")
+    implementation("br.com.devsrsouza.compose.icons:font-awesome:1.1.1")
 }
